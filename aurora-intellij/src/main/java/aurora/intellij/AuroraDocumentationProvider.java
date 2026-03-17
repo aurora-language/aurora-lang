@@ -4,7 +4,6 @@ import aurora.analyzer.AnalysisResult;
 import aurora.analyzer.AuroraAnalyzer;
 import aurora.analyzer.NodeFinder;
 import aurora.analyzer.SymbolResolver;
-import aurora.parser.tree.Declaration;
 import aurora.parser.tree.Node;
 import aurora.parser.tree.Program;
 import aurora.parser.tree.decls.*;
@@ -44,7 +43,7 @@ public class AuroraDocumentationProvider extends AbstractDocumentationProvider {
         if (!(file instanceof AuroraParserDefinition.AuroraFile)) return null;
 
         AnalysisResult result = new AuroraAnalyzer().analyze(file.getText(), file.getName());
-        if (result.program == null) return null;
+        if (result.program() == null) return null;
 
         Document doc = PsiDocumentManager.getInstance(target.getProject()).getDocument(file);
         if (doc == null) return null;
@@ -54,10 +53,10 @@ public class AuroraDocumentationProvider extends AbstractDocumentationProvider {
         int col    = offset - doc.getLineStartOffset(line - 1);
 
         NodeFinder finder = new NodeFinder(line, col);
-        List<Node> path = finder.findPath(result.program);
+        List<Node> path = finder.findPath(result.program());
         Node node = (path != null && !path.isEmpty()) ? path.getLast() : null;
 
-        Node decl = SymbolResolver.resolve(node, path, result.program, null);
+        Node decl = SymbolResolver.resolve(node, path, result.program(), null);
         if (decl == null) return null;
 
         return buildDoc(decl, target.getProject());

@@ -23,9 +23,8 @@ public final class AuroraAnalyzer {
         List<AuroraDiagnostic> diagnostics = new ArrayList<>();
         DiagnosticCollector collector = new DiagnosticCollector(diagnostics, sourceName);
 
-        Program program = null;
+        Program program;
 
-        // ── パース ──────────────────────────────────────────────
         try {
             program = AuroraParser.parseWithListener(source, sourceName, collector);
         } catch (Exception e) {
@@ -34,7 +33,6 @@ public final class AuroraAnalyzer {
             return new AnalysisResult(null, diagnostics);
         }
 
-        // ── 型チェック ──────────────────────────────────────────
         if (program != null) {
             try {
                 TypeChecker typeChecker = new TypeChecker(program, modules);
@@ -48,8 +46,6 @@ public final class AuroraAnalyzer {
 
         return new AnalysisResult(program, diagnostics);
     }
-
-    // ── ANTLR エラーを AuroraDiagnostic に集める内部クラス ───────────
 
     private static final class DiagnosticCollector extends BaseErrorListener {
         private final List<AuroraDiagnostic> diagnostics;
@@ -67,10 +63,6 @@ public final class AuroraAnalyzer {
                                 int charPositionInLine,
                                 String msg,
                                 RecognitionException e) {
-            // ANTLR が空白文字や制御文字を認識できなかった場合のノイズを除去する。
-            // 例: ブロックコメント内の改行、Unicode スペースなど。
-            if (isWhitespaceLexerError(msg)) return;
-
             int endCol = charPositionInLine + 1;
             if (offendingSymbol instanceof org.antlr.v4.runtime.Token token) {
                 String text = token.getText();
@@ -88,22 +80,6 @@ public final class AuroraAnalyzer {
                     -1, -1);
 
             diagnostics.add(AuroraDiagnostic.error(loc, cleanMessage(msg), SOURCE_PARSER));
-        }
-
-        /**
-         * "token recognition error at: 'X'" で X が空白・制御文字のみの場合は
-         * ユーザーに見せる価値がないので除外する。
-         */
-        private static boolean isWhitespaceLexerError(String msg) {
-            if (msg == null) return false;
-            // ANTLR のフォーマット: "token recognition error at: 'X'"
-            int atIdx = msg.indexOf("token recognition error at: '");
-            if (atIdx < 0) return false;
-            int from = atIdx + "token recognition error at: '".length();
-            int to   = msg.lastIndexOf('\'');
-            if (to <= from) return false;
-            String chars = msg.substring(from, to);
-            return chars.chars().allMatch(c -> c <= 0x20 || Character.isWhitespace(c));
         }
 
         private static String cleanMessage(String msg) {

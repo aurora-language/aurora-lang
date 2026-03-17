@@ -50,17 +50,17 @@ public final class Main implements Runnable {
 
         // "error: <message>"
         sb.append(RED).append(BOLD).append("error").append(RESET)
-                .append(BOLD).append("[type]: ").append(d.message).append(RESET).append("\n");
+                .append(BOLD).append("[type]: ").append(d.message()).append(RESET).append("\n");
 
-        if (d.location == null) return sb.toString();
+        if (d.location() == null) return sb.toString();
 
-        int line   = d.location.line();
-        int col    = d.location.column();    // 1-indexed
-        int endCol = d.location.endColumn(); // 1-indexed, inclusive
+        int line   = d.location().line();
+        int col    = d.location().column();    // 1-indexed
+        int endCol = d.location().endColumn(); // 1-indexed, inclusive
 
         // "  --> file:line:col"
         sb.append(CYAN).append("  --> ").append(RESET)
-                .append(d.location.sourceName()).append(":").append(line).append(":").append(col).append("\n");
+                .append(d.location().sourceName()).append(":").append(line).append(":").append(col).append("\n");
 
         if (sourceCode == null) return sb.toString();
 

@@ -39,7 +39,7 @@ public class AuroraExternalAnnotator extends ExternalAnnotator<AuroraExternalAnn
         }
         AnalysisResult result = new AuroraAnalyzer()
                 .analyze(info.text(), info.filePath(), modules);
-        return result.diagnostics;
+        return result.diagnostics();
     }
 
     @Override
@@ -53,7 +53,7 @@ public class AuroraExternalAnnotator extends ExternalAnnotator<AuroraExternalAnn
 
         for (AuroraDiagnostic d : diagnostics) {
             TextRange range = toTextRange(d, doc, file.getTextLength());
-            holder.newAnnotation(toSeverity(d.severity), d.message)
+            holder.newAnnotation(toSeverity(d.severity()), d.message())
                     .range(range)
                     .create();
         }
@@ -75,18 +75,18 @@ public class AuroraExternalAnnotator extends ExternalAnnotator<AuroraExternalAnn
     }
 
     private static TextRange toTextRange(AuroraDiagnostic d, Document doc, int fileLength) {
-        if (d.location == null || doc == null) {
+        if (d.location() == null || doc == null) {
             return TextRange.from(0, Math.min(1, fileLength));
         }
 
         int lineCount = doc.getLineCount();
 
         // SourceLocation は 1-based、Document は 0-based
-        int startLine = Math.min(Math.max(d.location.line() - 1, 0), lineCount - 1);
-        int endLine   = Math.min(Math.max(d.location.endLine() - 1, 0), lineCount - 1);
+        int startLine = Math.min(Math.max(d.location().line() - 1, 0), lineCount - 1);
+        int endLine   = Math.min(Math.max(d.location().endLine() - 1, 0), lineCount - 1);
 
-        int startOffset = doc.getLineStartOffset(startLine) + Math.max(d.location.column(), 0);
-        int endOffset   = doc.getLineStartOffset(endLine)   + Math.max(d.location.endColumn(), 0);
+        int startOffset = doc.getLineStartOffset(startLine) + Math.max(d.location().column(), 0);
+        int endOffset   = doc.getLineStartOffset(endLine)   + Math.max(d.location().endColumn(), 0);
 
         startOffset = Math.min(startOffset, fileLength);
         endOffset   = Math.min(Math.max(endOffset, startOffset + 1), fileLength);

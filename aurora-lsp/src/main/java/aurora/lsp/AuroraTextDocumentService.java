@@ -385,13 +385,13 @@ public class AuroraTextDocumentService implements TextDocumentService {
 
         AnalysisResult result = new AuroraAnalyzer().analyze(text, uri);
 
-        if (result.program != null) {
-            astMap.put(uri, result.program);
+        if (result.program() != null) {
+            astMap.put(uri, result.program());
         }
 
-        AuroraLanguageServer.LOGGER.info("  analysis done: %d diagnostics", result.diagnostics.size());
+        AuroraLanguageServer.LOGGER.info("  analysis done: %d diagnostics", result.diagnostics().size());
 
-        List<Diagnostic> lspDiags = result.diagnostics.stream()
+        List<Diagnostic> lspDiags = result.diagnostics().stream()
                 .map(AuroraTextDocumentService::toLspDiagnostic)
                 .collect(Collectors.toList());
 
@@ -405,20 +405,20 @@ public class AuroraTextDocumentService implements TextDocumentService {
     /** {@link AuroraDiagnostic} を LSP4J の {@link Diagnostic} に変換する。 */
     private static Diagnostic toLspDiagnostic(AuroraDiagnostic d) {
         Diagnostic diag = new Diagnostic();
-        diag.setSource(d.source);
-        diag.setMessage(d.message);
-        diag.setSeverity(switch (d.severity) {
+        diag.setSource(d.source());
+        diag.setMessage(d.message());
+        diag.setSeverity(switch (d.severity()) {
             case WARNING     -> DiagnosticSeverity.Warning;
             case INFORMATION -> DiagnosticSeverity.Information;
             case HINT        -> DiagnosticSeverity.Hint;
             default          -> DiagnosticSeverity.Error;
         });
-        if (d.location != null) {
+        if (d.location() != null) {
             // SourceLocation は 1-based line、LSP は 0-based
-            int startLine = Math.max(0, d.location.line() - 1);
-            int startCol  = Math.max(0, d.location.column());
-            int endLine   = Math.max(0, d.location.endLine() - 1);
-            int endCol    = Math.max(startCol + 1, d.location.endColumn());
+            int startLine = Math.max(0, d.location().line() - 1);
+            int startCol  = Math.max(0, d.location().column());
+            int endLine   = Math.max(0, d.location().endLine() - 1);
+            int endCol    = Math.max(startCol + 1, d.location().endColumn());
             diag.setRange(new Range(new Position(startLine, startCol), new Position(endLine, endCol)));
         } else {
             diag.setRange(new Range(new Position(0, 0), new Position(0, 1)));
