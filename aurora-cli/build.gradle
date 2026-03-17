@@ -3,7 +3,6 @@ plugins {
 }
 
 dependencies {
-    implementation project(":aurora-parser")
     implementation project(":aurora-core")
     implementation project(":aurora-lsp")
 

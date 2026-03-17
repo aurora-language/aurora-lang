@@ -62,7 +62,7 @@ subprojects {
         repositories {
             maven {
                 name = "akkiserver"
-                url = "https://maven.akkiserver.uk/repository/maven-public/"
+                url = "https://maven.akkiserver.uk/repository/maven-releases/"
 
                 credentials {
                     username = System.getenv("NEXUS_USERNAME")

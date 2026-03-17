@@ -568,11 +568,17 @@ public class AuroraParser extends AuroraParserBaseVisitor<Node> {
                     throw new IllegalStateException("'" + node.getClass().getSimpleName() + "' is not a statement");
                 })
                 .collect(Collectors.toList());
-        if (stmts.getLast() instanceof ExprStmt exprStmt) {
-            stmts.removeLast();
-            stmts.addLast(new ControlStmt.ReturnStmt(exprStmt.loc, exprStmt.expr));
+
+        BlockStmt block = new BlockStmt(loc(ctx), stmts);
+
+        if (!TypeInferenceEngine.isVoid(block.returnType)
+                && !stmts.isEmpty()
+                && stmts.getLast() instanceof ExprStmt exprStmt) {
+            stmts.set(stmts.size() - 1,
+                    new ControlStmt.ReturnStmt(exprStmt.loc, exprStmt.expr));
         }
-        return new BlockStmt(loc(ctx), stmts);
+
+        return block;
     }
 
     @Override

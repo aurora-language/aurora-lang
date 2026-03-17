@@ -1,7 +1,27 @@
-dependencies {
-    implementation project(":aurora-parser")
+plugins {
+    id 'java'
+    id 'antlr'
+}
 
+
+dependencies {
     implementation "org.eclipse.lsp4j:org.eclipse.lsp4j:0.21.0"
     implementation 'org.slf4j:slf4j-api:2.0.13'
     implementation 'ch.qos.logback:logback-classic:1.5.21'
+    implementation "org.antlr:antlr4-runtime:4.13.2"
+    antlr "org.antlr:antlr4:4.13.2"
+}
+
+sourceSets {
+    main {
+        java {
+            srcDir "$buildDir/generated-src/antlr/main"
+        }
+    }
+}
+
+generateGrammarSource {
+    final PARSER_PACKAGE_NAME = 'aurora.compiler.antlr'
+    arguments += ["-visitor", "-package", PARSER_PACKAGE_NAME]
+    outputDirectory = file("${generateGrammarSource.outputDirectory}/${PARSER_PACKAGE_NAME.replace('.', '/')}")
 }

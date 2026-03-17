@@ -11,7 +11,6 @@ import java.util.ArrayList;
 import java.util.List;
 
 public final class AuroraAnalyzer {
-
     private static final String SOURCE_PARSER      = "Aurora Parser";
     private static final String SOURCE_TYPECHECKER = "Aurora TypeChecker";
     private static final String SOURCE_INTERNAL    = "Aurora Analyzer";

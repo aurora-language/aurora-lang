@@ -13,7 +13,6 @@ repositories {
 
 dependencies {
     implementation project(":aurora-core")
-    implementation project(":aurora-parser")
 
     intellijPlatform {
         intellijIdeaCommunity("2024.3.7")
