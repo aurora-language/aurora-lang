@@ -12,6 +12,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import static aurora.analyzer.TypeInferenceEngine.numericRank;
+
 /**
  * A static analysis pass that evaluates type safety, focusing on nullability and basic inheritance.
  * This class implements a {@link NodeVisitor} that traverses the AST and collects type information,
@@ -69,6 +71,17 @@ public class TypeChecker implements NodeVisitor<TypeNode> {
      */
     public void reportError(Node node, String message) {
         diagnostics.add(AuroraDiagnostic.error(node.loc, message, "Aurora TypeChecker"));
+    }
+
+
+    /**
+     * Reports a type warning at the specified node's location.
+     *
+     * @param node    The AST node where the error occurred.
+     * @param message The error message.
+     */
+    public void reportWarn(Node node, String message) {
+        diagnostics.add(AuroraDiagnostic.warning(node.loc, message, "Aurora TypeChecker"));
     }
 
     public Map<String, Declaration> getGlobals() {
@@ -198,9 +211,11 @@ public class TypeChecker implements NodeVisitor<TypeNode> {
         //   int   -> long, float, double
         //   long  -> float, double
         //   float -> double
-        if (value.name.equals("int")   && (target.name.equals("long") || target.name.equals("float") || target.name.equals("double"))) return true;
-        if (value.name.equals("long")  && (target.name.equals("float") || target.name.equals("double"))) return true;
-        if (value.name.equals("float") && target.name.equals("double")) return true;
+        int targetRank = numericRank(target.name);
+        int valueRank  = numericRank(value.name);
+        if (targetRank >= 0 && valueRank >= 0) {
+            return valueRank < targetRank;
+        }
 
         // Check inheritance
         Node valDecl = SymbolResolver.resolveTypeName(currentProgram, value.name, modules);
@@ -551,7 +566,7 @@ public class TypeChecker implements NodeVisitor<TypeNode> {
             }
         }
         endScope();
-        return ANY;
+        return NONE;
     }
 
     @Override
@@ -563,7 +578,7 @@ public class TypeChecker implements NodeVisitor<TypeNode> {
                 reportError(decl, "Cannot assign type '" + initType + "' to '" + decl.type + "'");
             }
         }
-        return ANY;
+        return NONE;
     }
 
     @Override
@@ -577,7 +592,7 @@ public class TypeChecker implements NodeVisitor<TypeNode> {
             visitBlockStmt(decl.body);
         }
         endScope();
-        return ANY;
+        return NONE;
     }
 
     @Override
@@ -591,11 +606,12 @@ public class TypeChecker implements NodeVisitor<TypeNode> {
             visitBlockStmt(b);
         }
         endScope();
-        return ANY;
+        return NONE;
     }
 
     @Override
     public TypeNode visitClassParamDecl(ClassParamDecl decl) {
+        reportWarn(decl, "Unable to inference");
         return ANY;
     }
 
@@ -621,6 +637,7 @@ public class TypeChecker implements NodeVisitor<TypeNode> {
 
     @Override
     public TypeNode visitParamDecl(ParamDecl decl) {
+        reportWarn(decl, "Unable to inference");
         return ANY;
     }
 
@@ -631,6 +648,7 @@ public class TypeChecker implements NodeVisitor<TypeNode> {
 
     @Override
     public TypeNode visitInterfaceDecl(InterfaceDecl decl) {
+        reportWarn(decl, "Unable to inference");
         return ANY;
     }
 
@@ -648,7 +666,10 @@ public class TypeChecker implements NodeVisitor<TypeNode> {
             return visitAccessExpr(e);
         if (expr instanceof SelfExpr e)
             return visitSelfExpr(e);
+        if (expr instanceof RangeExpr e)
+            return visitRangeExpr(e);
         // Add others as needed
+        reportWarn(expr, "Unable to inference: [" + expr.getClass().getName() + "]");
         return ANY;
     }
 
@@ -690,10 +711,8 @@ public class TypeChecker implements NodeVisitor<TypeNode> {
             argTypes.add(visitExpr(arg.value));
         }
 
-        // --- メソッド呼び出し: object.method(...) または Class::method(...) ---
         if (expr.callee instanceof AccessExpr access && access.object != null) {
             TypeNode receiverType = visitExpr(access.object);
-            // ANY の場合は解決できないのでスキップ
             if (!receiverType.name.equals("Any")) {
                 Declaration member = resolveMember(receiverType.name, access.member);
                 if (member instanceof FunctionDecl func) {
@@ -713,62 +732,56 @@ public class TypeChecker implements NodeVisitor<TypeNode> {
             return ANY;
         }
 
-        // --- 単純な関数呼び出し: foo(...) ---
-        TypeNode calleeType = visitExpr(expr.callee);
+        if (expr.callee instanceof AccessExpr bare && bare.object == null) {
+            Declaration mayBeDecl = globals.get(bare.member);
 
-        // globals でクラスとして見つかった場合はコンストラクタ呼び出し → クラス型を返す
-        Declaration mayBeDecl = globals.get(calleeType.name);
-        if (mayBeDecl instanceof ClassDecl || mayBeDecl instanceof RecordDecl) {
-            return new TypeNode(expr.loc, calleeType.name);
-        }
-
-        if (mayBeDecl instanceof FunctionDecl fun) {
-            if (fun.params.size() != argTypes.size()) {
-                reportError(expr, "Expected " + fun.params.size() + " arguments, but found " + argTypes.size());
+            if (mayBeDecl instanceof ClassDecl || mayBeDecl instanceof RecordDecl) {
+                return new TypeNode(expr.loc, bare.member);
             }
-            for (int i = 0; i < Math.min(fun.params.size(), argTypes.size()); i++) {
-                if (!isAssignable(fun.params.get(i).type, argTypes.get(i))) {
-                    reportError(argTypes.get(i), "Argument " + (i + 1) + ": expected '" + fun.params.get(i).type + "', but found '" + argTypes.get(i) + "'");
+
+            if (mayBeDecl instanceof FunctionDecl fun) {
+                if (fun.params != null && fun.params.size() != argTypes.size()) {
+                    reportError(expr, "Expected " + fun.params.size() + " arguments, but found " + argTypes.size());
                 }
+                if (fun.params != null) {
+                    for (int i = 0; i < Math.min(fun.params.size(), argTypes.size()); i++) {
+                        if (!isAssignable(fun.params.get(i).type, argTypes.get(i))) {
+                            reportError(argTypes.get(i), "Argument " + (i + 1) + ": expected '" + fun.params.get(i).type + "', but found '" + argTypes.get(i) + "'");
+                        }
+                    }
+                }
+                return fun.returnType != null ? fun.returnType : ANY;
             }
-            return fun.returnType != null ? fun.returnType : ANY;
         }
 
-        // 解決できない場合は ANY を返す（過検出を避けるためエラーにしない）
+        reportWarn(expr, "Unable to inference");
         return ANY;
     }
 
     @Override
     public TypeNode visitAccessExpr(AccessExpr expr) {
-        // 単純な変数参照: foo
         if (expr.object == null) {
-            // スコープから型を解決し、globals からより具体的な型を試みる
             TypeNode scopeType = resolveVariable(expr.member);
             if (!scopeType.name.equals("Any")) return scopeType;
 
-            // globals から宣言を探してクラス名を返す
             Declaration decl = globals.get(expr.member);
             if (decl instanceof ClassDecl cls) return new TypeNode(expr.loc, cls.name);
             if (decl instanceof FunctionDecl func) return func.returnType != null ? func.returnType : ANY;
             return scopeType;
         }
 
-        // self.member
         if (expr.object instanceof SelfExpr) {
             return resolveVariable(expr.member);
         }
 
-        // object.member: まず object の型を解決してからメンバーを検索
         TypeNode objectType = visitExpr(expr.object);
         if (objectType.name.equals("Any")) return ANY;
 
-        // 配列アクセス後の型 (string[] → string)
         String baseTypeName = objectType.name;
 
         Declaration member = resolveMember(baseTypeName, expr.member);
         if (member != null) return typeOfMember(member);
 
-        // globals から直接クラスとして解決できる場合（static アクセス: Io::println など）
         Declaration classDecl = globals.get(baseTypeName);
         if (classDecl instanceof ClassDecl cls && cls.members != null) {
             for (Declaration m : cls.members) {
@@ -776,6 +789,7 @@ public class TypeChecker implements NodeVisitor<TypeNode> {
             }
         }
 
+        reportWarn(expr, "Unable to inference");
         return ANY;
     }
 
@@ -791,18 +805,17 @@ public class TypeChecker implements NodeVisitor<TypeNode> {
 
     @Override
     public TypeNode visitIndexExpr(IndexExpr expr) {
-        // 配列のインデックスアクセス: arr[i] → 配列の要素型を返す
         TypeNode objectType = visitExpr(expr.object);
         visitExpr(expr.index);
 
-        // string[] → string のように配列サフィックスを除いた型を返す
         if (objectType.suffixes != null && !objectType.suffixes.isEmpty()) {
             TypeNode elementType = new TypeNode(expr.loc, objectType.name);
-            // サフィックスを1つ剥がす（最後の [] を除去）
             List<TypeNode.TypeSuffix> remaining = objectType.suffixes.subList(0, objectType.suffixes.size() - 1);
             elementType.suffixes.addAll(remaining);
             return elementType;
         }
+
+        reportWarn(expr, "Unable to inference");
         return ANY;
     }
 
@@ -825,6 +838,7 @@ public class TypeChecker implements NodeVisitor<TypeNode> {
 
         }
 
+        reportWarn(expr, "Unable to inference");
         return ANY;
     }
 
@@ -835,7 +849,7 @@ public class TypeChecker implements NodeVisitor<TypeNode> {
 
     @Override
     public TypeNode visitRangeExpr(RangeExpr expr) {
-        return ANY;
+        return new TypeNode(expr.loc, "Range");
     }
 
     @Override

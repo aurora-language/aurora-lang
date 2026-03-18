@@ -90,7 +90,7 @@ public class FunctionDecl extends Declaration {
         if (params != null) {
             sb.append(params.stream().map(Object::toString).collect(Collectors.joining(", ")));
         }
-        sb.append("): ").append(returnType != null ? returnType : "Void");
+        sb.append(") -> ").append(returnType != null ? returnType : "Void");
 
         if (isExpressionBody) {
             sb.append(" => ").append(body);

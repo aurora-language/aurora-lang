@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="a-grad" x1="0%" y1="100%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#38BDF8"/>
+      <stop offset="100%" stop-color="#818CF8"/>
+    </linearGradient>
+    
+    <linearGradient id="aurora-grad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#34D399"/>
+      <stop offset="50%" stop-color="#2DD4BF"/>
+      <stop offset="100%" stop-color="#38BDF8"/>
+    </linearGradient>
+  </defs>
+
+  <path d="M80 448 L256 48 L432 448" fill="none" stroke="url(#a-grad)" stroke-width="48" stroke-linejoin="round" stroke-linecap="round"/>
+  
+  <path d="M64 320 C 160 192, 352 448, 448 320" fill="none" stroke="url(#aurora-grad)" stroke-width="44" stroke-linecap="round"/>
+</svg>

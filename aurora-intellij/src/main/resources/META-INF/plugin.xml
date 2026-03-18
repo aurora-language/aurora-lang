@@ -1,7 +1,60 @@
 <idea-plugin>
     <id>aurora.intellij</id>
-    <name>Aurora</name>
+    <name>Aurora Language Support</name>
     <vendor>Aurora</vendor>
+    <description><![CDATA[
+<h2>Aurora Language Support for IntelliJ IDEA</h2>
+
+<p>
+  Provides first-class IDE support for the
+  <a href="https://github.com/akkiserver-dev/aurora-lang">Aurora programming language</a>
+  — a modern, statically typed language with Kotlin/Rust-inspired syntax that compiles to
+  efficient JVM bytecode.
+</p>
+
+<h3>Features</h3>
+
+<ul>
+  <li>
+    <b>File Type Recognition</b> —
+    Automatically recognizes <code>.ar</code> source files and associates them with the
+    Aurora language.
+  </li>
+  <li>
+    <b>Syntax Highlighting</b> —
+    Full token-level highlighting for keywords, type keywords, modifiers, identifiers,
+    string literals, numeric literals, boolean/null literals, operators, and comments.
+  </li>
+  <li>
+    <b>Error &amp; Warning Annotations</b> —
+    Real-time diagnostics powered by the Aurora compiler. Parse errors and type-check
+    violations are underlined directly in the editor as you type.
+  </li>
+  <li>
+    <b>Documentation Popups (Quick Doc)</b> —
+    Press <kbd>Ctrl+Q</kbd> / <kbd>F1</kbd> on any symbol to view its signature with
+    syntax-highlighted code, doc-comment content, and parameter details in a rich HTML popup.
+  </li>
+</ul>
+
+<h3>Aurora Language Highlights</h3>
+
+<ul>
+  <li>Static typing with full null safety (<code>?</code> nullable types, <code>?.</code> safe calls, <code>?:</code> Elvis operator)</li>
+  <li>Modern control flow: <code>if</code> expressions, <code>match</code> pattern matching, <code>for</code>/<code>while</code>/<code>repeat-until</code> loops</li>
+  <li>Object-oriented programming: classes, traits, abstract classes, inheritance, <code>override</code></li>
+  <li>Functional style: lambdas, higher-order functions, extension functions</li>
+  <li>Flexible error handling: <code>Result&lt;T, E&gt;</code> type and <code>try-catch-finally</code></li>
+  <li>Concurrency: <code>async</code>/<code>await</code> coroutines and OS-level <code>thread</code> expressions</li>
+  <li>Rich standard library: <code>Io</code>, <code>Collections</code>, <code>Concurrent</code> modules</li>
+</ul>
+
+<h3>Requirements</h3>
+
+<ul>
+  <li>IntelliJ IDEA 2024.3 (build 243)</li>
+</ul>
+]]></description>
 
     <idea-version since-build="243" until-build="243.*"/>
 

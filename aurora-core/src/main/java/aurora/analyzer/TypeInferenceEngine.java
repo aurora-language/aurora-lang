@@ -5,54 +5,40 @@ import aurora.parser.tree.*;
 import aurora.parser.tree.decls.*;
 import aurora.parser.tree.expr.*;
 import aurora.parser.tree.stmt.*;
-import aurora.parser.tree.expr.LiteralExpr.LiteralType;
-import aurora.parser.tree.util.BinaryOperator;
 
 import java.util.*;
 
 /**
- * Infers return types for every {@link BlockStmt} and unannotated
- * {@link FunctionDecl} in an Aurora AST.
+ * Infers the return types of all {@link BlockStmt} nodes in an AST.
  *
- * <h2>Why this exists</h2>
- * {@code AuroraParser.visitBlock()} currently rewrites the trailing
- * {@link ExprStmt} of <em>every</em> block into a
- * {@link aurora.parser.tree.stmt.ControlStmt.ReturnStmt}.  That breaks loop
- * bodies, which are always {@code void}: a trailing {@code Io::println(…)}
- * inside a {@code for} loop becomes {@code RETURN}, exiting the enclosing
- * function after the first iteration.
- *
- * <p>The fix is to run this engine <em>after</em> parsing (so the full AST is
- * available) and annotate each {@link BlockStmt} with its inferred
- * {@link TypeNode} via {@link BlockStmt#returnType}.  {@code visitBlock()} then
- * gates the rewrite on {@link #isVoid(TypeNode)}.
- *
- * <h2>Inference algorithm</h2>
- * The engine performs a single top-down walk with a context stack that tracks
- * the "owning context" of each block:
- *
+ * <p>This engine performs a two-pass analysis:
  * <ol>
- *   <li><b>Loop body</b> ({@code for} / {@code while} / {@code repeat-until})
- *       → always {@code void}.</li>
- *   <li><b>Function body</b> with an explicit non-void return type annotation
- *       → annotate with that declared type.</li>
- *   <li><b>Function body</b> with <em>no</em> return type annotation (or
- *       {@code void} / {@code Void})
- *       → infer from the block's last statement:
- *       <ul>
- *         <li>last stmt is {@link ExprStmt}    → infer expression type</li>
- *         <li>last stmt is {@link aurora.parser.tree.stmt.ControlStmt.ReturnStmt}
- *             with a value → infer that value's type</li>
- *         <li>otherwise → {@code void}</li>
- *       </ul>
- *   </li>
- *   <li><b>All other blocks</b> (if-then, if-else, try, catch …)
- *       → same trailing-statement inference as (3).</li>
+ *   <li>Global symbol collection (forward-reference support, import resolution)</li>
+ *   <li>Full AST traversal with recursive-safe type inference</li>
  * </ol>
  *
- * <h2>Scope / symbol table</h2>
- * A lightweight scope stack maps variable names to their {@link TypeNode}.
- * This is sufficient for the return-type use-case; full type-checking remains
+ * <h2>Recursive function handling</h2>
+ * When a function calls itself (directly or mutually), its return type is not yet
+ * known at the time of the recursive call.  The engine handles this with an
+ * "in-progress" sentinel: during inference of a function body, the function's
+ * return type is set to {@link #IN_PROGRESS}.  Any recursive call that encounters
+ * {@code IN_PROGRESS} falls back to skipping the recursive branch.  After the body
+ * is fully visited the final inferred type replaces the sentinel, and a second pass
+ * re-evaluates the body with the now-known return type so that callers get the
+ * correct type rather than {@code UNKNOWN}.
+ *
+ * <h2>Binary-expression type merging</h2>
+ * For binary expressions such as {@code fib(n-1) + fib(n-2)}, both operands are
+ * inferred and merged: if one side is {@code UNKNOWN} / {@code Any} and the other
+ * is concrete, the concrete type wins.  If both sides remain {@code UNKNOWN} after
+ * all resolution attempts, a diagnostic is emitted and the expression type stays
+ * {@code UNKNOWN} (which will later block compilation).
+ *
+ * <h2>Diagnostics</h2>
+ * Diagnostics (errors/warnings) are accumulated in a list accessible via
+ * {@link #getDiagnostics()}.  Callers should propagate these to the user.
+ *
+ * <p>This is sufficient for the return-type use-case; full type-checking remains
  * the responsibility of {@link TypeChecker}.
  *
  * <h2>Integration with AuroraParser</h2>
@@ -84,6 +70,13 @@ public final class TypeInferenceEngine {
     public static final TypeNode UNKNOWN =
             new TypeNode(new SourceLocation(), "Any");
 
+    /**
+     * Sentinel used while a function body is being inferred to detect recursive
+     * calls and avoid infinite recursion.
+     */
+    private static final TypeNode IN_PROGRESS =
+            new TypeNode(new SourceLocation(), "__in_progress__");
+
     // -----------------------------------------------------------------------
     // Context enum – what owns the current block?
     // -----------------------------------------------------------------------
@@ -113,18 +106,24 @@ public final class TypeInferenceEngine {
      * Resolved return types for functions whose {@link FunctionDecl#returnType}
      * was {@code null} or {@code void} at parse time.  Keyed by identity
      * (reference equality) because multiple functions may share the same name.
+     *
+     * <p>During inference of a function body, the entry for that function is
+     * temporarily set to {@link #IN_PROGRESS} to detect recursive calls.
      */
     private final IdentityHashMap<FunctionDecl, TypeNode> inferredReturnTypes =
             new IdentityHashMap<>();
-
-    /** Stack of the owning-context for each nested block. */
-    private final Deque<BlockContext> contextStack = new ArrayDeque<>();
 
     /**
      * When inside a function body, the declared (or being-inferred) return type.
      * {@code null} while outside any function.
      */
     private TypeNode currentFunctionReturnType = null;
+
+    /**
+     * Diagnostics accumulated during inference.
+     * Callers retrieve these via {@link #getDiagnostics()}.
+     */
+    private final List<AuroraDiagnostic> diagnostics = new ArrayList<>();
 
     // -----------------------------------------------------------------------
     // Construction
@@ -150,7 +149,8 @@ public final class TypeInferenceEngine {
      * {@link BlockStmt#returnType} field set.
      */
     public void infer() {
-        // First pass: collect all top-level declarations so forward references work.
+        // First pass: collect all top-level declarations so forward references work,
+        // including symbols imported from other modules.
         collectGlobals(program);
         // Second pass: full traversal.
         visitProgram(program);
@@ -164,6 +164,14 @@ public final class TypeInferenceEngine {
         TypeNode declared = decl.returnType;
         if (declared != null && !isVoid(declared)) return declared;
         return inferredReturnTypes.getOrDefault(decl, VOID);
+    }
+
+    /**
+     * Returns the list of diagnostics emitted during inference.
+     * This includes errors for expressions whose type could not be determined.
+     */
+    public List<AuroraDiagnostic> getDiagnostics() {
+        return Collections.unmodifiableList(diagnostics);
     }
 
     /**
@@ -181,11 +189,51 @@ public final class TypeInferenceEngine {
     // First pass – global symbol collection
     // -----------------------------------------------------------------------
 
+    /**
+     * Collects all top-level declarations into {@link #globals}, including
+     * declarations exported from imported modules.
+     *
+     * <p>Import resolution: each {@code use} directive is resolved through the
+     * {@link ModuleResolver}.  Every top-level {@link Declaration} found in the
+     * imported module is added to {@code globals} under its unqualified name so
+     * that code such as {@code Io::println(…)} can be resolved to the correct
+     * {@link ClassDecl} or {@link FunctionDecl}.
+     */
     private void collectGlobals(Program prog) {
         if (prog.statements == null) return;
+
+        // 1. Local top-level declarations
         for (Statement s : prog.statements) {
             if (s instanceof Declaration d && d.name != null) {
                 globals.put(d.name, d);
+            }
+        }
+
+        // 2. Imported module declarations
+        if (modules != null && prog.imports != null) {
+            for (Program.Import imp : prog.imports) {
+                Program mod = modules.loadModule(imp.path);
+                if (mod == null || mod.statements == null) continue;
+                for (Statement s : mod.statements) {
+                    if (s instanceof Declaration d && d.name != null) {
+                        // Don't overwrite locally-defined names
+                        globals.putIfAbsent(d.name, d);
+                    }
+                }
+                // Also register the last segment of the import path as an alias for
+                // the module's primary class (e.g. "Aurora.Io" → register "Io").
+                String path = imp.path;
+                if (path != null) {
+                    String lastName = path.contains(".")
+                            ? path.substring(path.lastIndexOf('.') + 1)
+                            : path;
+                    for (Statement s : mod.statements) {
+                        if (s instanceof ClassDecl cls && lastName.equals(cls.name)) {
+                            globals.putIfAbsent(lastName, cls);
+                            break;
+                        }
+                    }
+                }
             }
         }
     }
@@ -224,55 +272,36 @@ public final class TypeInferenceEngine {
     /**
      * Visits a block, infers the type its last statement produces, and writes
      * the result into {@link BlockStmt#returnType}.
-     *
-     * @param block   the block to annotate
-     * @param context who owns this block
      */
-    private void visitBlock(BlockStmt block, BlockContext context) {
-        if (block == null) return;
-
-        contextStack.push(context);
+    private void visitBlock(BlockStmt block, BlockContext ctx) {
         pushScope();
 
-        TypeNode blockType = VOID;
-
-        if (context == BlockContext.LOOP) {
-            // Loop bodies are always void – visit children for side-effects only.
-            for (Statement s : block.statements) visitStatement(s);
-        } else {
-            // Visit all statements; remember the type the last one produces.
-            for (int i = 0; i < block.statements.size(); i++) {
-                Statement s = block.statements.get(i);
-                boolean isLast = (i == block.statements.size() - 1);
-
-                if (isLast) {
-                    blockType = typeOfStatement(s);
-                } else {
-                    visitStatement(s);
-                }
+        TypeNode last = VOID;
+        if (block.statements != null) {
+            for (Statement s : block.statements) {
+                last = visitBlockStatement(s, ctx);
             }
         }
 
-        block.returnType = blockType;
+        // Loop bodies never produce a return value.
+        block.returnType = (ctx == BlockContext.LOOP) ? VOID : last;
 
         popScope();
-        contextStack.pop();
     }
 
     /**
-     * Returns the {@link TypeNode} that a statement "produces" as its value –
-     * i.e. the type it would contribute if it were the last statement of a block.
-     * For non-expression statements this is {@link #VOID}.
+     * Visits a single statement inside a block and returns the type it produces
+     * as the "tail value" of that statement (VOID for most statements).
      */
-    private TypeNode typeOfStatement(Statement stmt) {
+    private TypeNode visitBlockStatement(Statement stmt, BlockContext ctx) {
         return switch (stmt) {
             case ExprStmt s -> {
                 TypeNode t = inferExpr(s.expr);
-                yield t != null ? t : VOID;
+                yield (ctx == BlockContext.FUNCTION) ? t : VOID;
             }
             case ControlStmt.ReturnStmt s -> {
-                TypeNode t = s.value != null ? inferExpr(s.value) : VOID;
-                yield t != null ? t : VOID;
+                TypeNode t = (s.value != null) ? inferExpr(s.value) : VOID;
+                yield t;
             }
             case FieldDecl s -> {
                 visitFieldDecl(s);
@@ -321,11 +350,28 @@ public final class TypeInferenceEngine {
         TypeNode declaredType = decl.type;
         TypeNode initType     = decl.init != null ? inferExpr(decl.init) : VOID;
         TypeNode resolved     = (declaredType != null && !isVoid(declaredType))
-                                    ? declaredType
-                                    : (initType != null ? initType : UNKNOWN);
+                ? declaredType
+                : (initType != null ? initType : UNKNOWN);
         declareVariable(decl.name, resolved);
     }
 
+    /**
+     * Infers the return type of a function declaration.
+     *
+     * <h3>Recursive-safe inference algorithm</h3>
+     * <ol>
+     *   <li>Before visiting the body, register {@link #IN_PROGRESS} for this
+     *       function in {@code inferredReturnTypes} so that recursive calls
+     *       encounter the sentinel instead of looping.</li>
+     *   <li>Visit the body to obtain a first-pass inferred type.  If a recursive
+     *       call was encountered it will have returned {@code UNKNOWN}; the rest
+     *       of the expression (e.g. the other branch of the {@code if}) may still
+     *       resolve to a concrete type.</li>
+     *   <li>Register the first-pass result and re-visit the body once more.
+     *       Now that the return type is known, recursive calls resolve correctly
+     *       and the final inferred type is stable.</li>
+     * </ol>
+     */
     private void visitFunctionDecl(FunctionDecl decl) {
         if (decl.body == null) return;
 
@@ -342,16 +388,37 @@ public final class TypeInferenceEngine {
         boolean hasExplicitNonVoid = declared != null && !isVoid(declared);
 
         TypeNode outer = currentFunctionReturnType;
-        currentFunctionReturnType = hasExplicitNonVoid ? declared : null; // will be filled in
 
-        // Visit body – use FUNCTION context so trailing exprs are typed, not voided.
-        visitBlock(decl.body, BlockContext.FUNCTION);
+        if (hasExplicitNonVoid) {
+            currentFunctionReturnType = declared;
+            // Visit body – use FUNCTION context so trailing exprs are typed, not voided.
+            visitBlock(decl.body, BlockContext.FUNCTION);
+        } else {
+            // Mark as in-progress before visiting to handle recursive self-calls.
+            inferredReturnTypes.put(decl, IN_PROGRESS);
+            currentFunctionReturnType = null;
 
-        if (!hasExplicitNonVoid) {
-            // Infer from the body's annotated return type.
-            TypeNode inferred = decl.body.returnType;
-            inferredReturnTypes.put(decl, inferred != null ? inferred : VOID);
-            decl.returnType = inferred;
+            // First pass: body is visited; recursive calls see IN_PROGRESS → UNKNOWN.
+            visitBlock(decl.body, BlockContext.FUNCTION);
+            TypeNode firstPass = decl.body.returnType;
+            TypeNode resolved  = (firstPass != null && !isInProgress(firstPass))
+                    ? firstPass : UNKNOWN;
+
+            // Register first-pass result so that recursive calls in the second pass
+            // can use the (now-known) concrete type.
+            inferredReturnTypes.put(decl, resolved);
+
+            // Second pass: only needed when first pass produced UNKNOWN (recursive case).
+            if (isUnknown(resolved)) {
+                visitBlock(decl.body, BlockContext.FUNCTION);
+                TypeNode secondPass = decl.body.returnType;
+                if (secondPass != null && !isUnknown(secondPass) && !isInProgress(secondPass)) {
+                    resolved = secondPass;
+                }
+            }
+
+            inferredReturnTypes.put(decl, resolved != null ? resolved : VOID);
+            decl.returnType = resolved;
         }
 
         currentFunctionReturnType = outer;
@@ -436,12 +503,27 @@ public final class TypeInferenceEngine {
         };
     }
 
+    /**
+     * Infers the type of a binary expression.
+     *
+     * <h3>Type merging for UNKNOWN operands</h3>
+     * After inferring both sides, if one side is {@code UNKNOWN} / {@code Any} and
+     * the other is a concrete type, the concrete type is used (e.g. during the
+     * second pass of recursive inference, {@code fib(n-1) + fib(n-2)} resolves
+     * correctly once the function's return type is known).
+     *
+     * If both sides are {@code UNKNOWN} after all resolution attempts, a
+     * diagnostic error is emitted so the problem is visible to the user.
+     */
     private TypeNode inferBinary(BinaryExpr e) {
         TypeNode left  = inferExpr(e.left);
         TypeNode right = inferExpr(e.right);
 
         return switch (e.op) {
-            case ADD, SUB, MUL, DIV, MOD -> widenNumeric(left, right);
+            case ADD, SUB, MUL, DIV, MOD -> {
+                TypeNode merged = mergeTypes(e, left, right);
+                yield widenNumeric(merged, right);
+            }
             case LT, LE,
                  GT, GE,
                  EQ, NEQ,
@@ -449,6 +531,31 @@ public final class TypeInferenceEngine {
             case ASSIGN              -> right;
             default                  -> left;
         };
+    }
+
+    /**
+     * Merges two types for arithmetic expressions, preferring concrete types over
+     * {@code UNKNOWN}.  Emits a diagnostic when both sides are unresolvable.
+     *
+     * @param anchor the expression node used for diagnostic location
+     * @param left   inferred type of the left operand
+     * @param right  inferred type of the right operand
+     * @return the best concrete type, or {@code UNKNOWN} if neither side is concrete
+     */
+    private TypeNode mergeTypes(Expr anchor, TypeNode left, TypeNode right) {
+        boolean leftUnknown  = isUnknown(left);
+        boolean rightUnknown = isUnknown(right);
+
+        if (!leftUnknown)  return left;
+        if (!rightUnknown) return right;
+
+        // Both sides are UNKNOWN – emit a diagnostic error.
+        diagnostics.add(AuroraDiagnostic.error(
+                anchor.loc,
+                "Cannot determine the type of this expression: both operands have unknown types. Please add an explicit type annotation.",
+                "Aurora TypeInferenceEngine")
+        );
+        return UNKNOWN;
     }
 
     /**
@@ -461,6 +568,11 @@ public final class TypeInferenceEngine {
      *   <li>Call to a locally scoped variable (e.g. a lambda stored in a val).</li>
      *   <li>Falls back to {@link #UNKNOWN}.</li>
      * </ol>
+     *
+     * <p>When the resolved function's return type is {@link #IN_PROGRESS} (i.e. the
+     * function is currently being inferred – a recursive call), {@code UNKNOWN} is
+     * returned for this invocation so that the caller can still determine its own
+     * type from the non-recursive branch.
      */
     private TypeNode inferCall(CallExpr e) {
         // --- method / static call:  receiver.method(…)  or  Class::method(…) ---
@@ -468,7 +580,13 @@ public final class TypeInferenceEngine {
             TypeNode receiverType = inferExpr(access.object);
             Declaration memberDecl = resolveMember(receiverType.name, access.member);
             if (memberDecl instanceof FunctionDecl f) {
-                return resolvedReturnType(f);
+                TypeNode ret = resolvedReturnType(f);
+                if (isInProgress(ret)) {
+                    for (CallExpr.Argument arg : e.arguments) inferExpr(arg.value);
+                    return UNKNOWN; // recursive call – type not yet known
+                }
+                for (CallExpr.Argument arg : e.arguments) inferExpr(arg.value);
+                return ret;
             }
             // Receiver type is unknown but we still need to visit args.
             for (CallExpr.Argument arg : e.arguments) inferExpr(arg.value);
@@ -485,8 +603,12 @@ public final class TypeInferenceEngine {
             if (decl instanceof RecordDecl rd) return new TypeNode(e.loc, rd.name);
 
             if (decl instanceof FunctionDecl f) {
+                TypeNode ret = resolvedReturnType(f);
                 for (CallExpr.Argument arg : e.arguments) inferExpr(arg.value);
-                return resolvedReturnType(f);
+                if (isInProgress(ret)) {
+                    return UNKNOWN; // recursive call – type not yet known
+                }
+                return ret;
             }
 
             // May be a locally-scoped value (lambda / function reference).
@@ -520,6 +642,21 @@ public final class TypeInferenceEngine {
         return UNKNOWN;
     }
 
+    /**
+     * Infers the type of an if-expression.
+     *
+     * <p>The result type is determined by merging the then-branch and else-branch
+     * types:
+     * <ul>
+     *   <li>If both branches agree on the same concrete type, that type is returned.</li>
+     *   <li>If one branch is {@code UNKNOWN} / {@code Any} and the other is
+     *       concrete, the concrete type is used (important during recursive
+     *       inference where the recursive branch initially returns {@code UNKNOWN}
+     *       but the base-case branch returns a concrete type such as {@code int}).</li>
+     *   <li>If only a then-branch exists and it has a concrete type, that type
+     *       is returned (single-arm if-expression).</li>
+     * </ul>
+     */
     private TypeNode inferIfExpr(IfExpr e) {
         inferExpr(e.condition);
         visitBlock(e.thenBlock, BlockContext.OTHER);
@@ -531,8 +668,15 @@ public final class TypeInferenceEngine {
             elseType = e.elseBlock.returnType;
         }
 
-        if (isVoid(thenType)) {
-            
+        // If one branch produced a concrete type and the other is UNKNOWN/void,
+        // prefer the concrete type.  This handles the recursive base-case pattern:
+        //   if n < 2 then n          ← base case: concrete (int)
+        //   else fib(n-1) + fib(n-2) ← recursive branch: UNKNOWN on first pass
+        if (!isVoid(thenType) && !isUnknown(thenType)) {
+            if (isVoid(elseType) || isUnknown(elseType)) return thenType;
+        }
+        if (!isVoid(elseType) && !isUnknown(elseType)) {
+            if (isVoid(thenType) || isUnknown(thenType)) return elseType;
         }
 
         // Union: if both branches agree, return that; otherwise widen to UNKNOWN.
@@ -570,12 +714,16 @@ public final class TypeInferenceEngine {
 
     /**
      * Gets the return type for a function, using inferred type if the declared
-     * one is void/null.
+     * one is void/null.  Returns {@link #IN_PROGRESS} if the function is
+     * currently being inferred (to indicate a recursive call).
      */
     private TypeNode resolvedReturnType(FunctionDecl f) {
         TypeNode declared = f.returnType;
         if (declared != null && !isVoid(declared)) return declared;
-        return inferredReturnTypes.getOrDefault(f, UNKNOWN);
+        TypeNode inferred = inferredReturnTypes.get(f);
+        // IN_PROGRESS → signal recursive call to caller
+        if (inferred != null) return inferred;
+        return UNKNOWN;
     }
 
     /**
@@ -610,7 +758,8 @@ public final class TypeInferenceEngine {
     }
 
     /** Returns the widening rank for a primitive numeric name, or -1 if not numeric. */
-    private static int numericRank(String name) {
+    static int numericRank(String name) {
+        if (name == null) return -1;
         return switch (name) {
             case "int"    -> 0;
             case "long"   -> 1;
@@ -620,38 +769,42 @@ public final class TypeInferenceEngine {
         };
     }
 
+    /** Returns {@code true} when {@code type} is the {@link #UNKNOWN} / "Any" sentinel. */
+    private static boolean isUnknown(TypeNode type) {
+        if (type == null) return true;
+        return "Any".equals(type.name) || type == UNKNOWN;
+    }
+
+    /** Returns {@code true} when {@code type} is the {@link #IN_PROGRESS} sentinel. */
+    private static boolean isInProgress(TypeNode type) {
+        return type != null && IN_PROGRESS.name.equals(type.name);
+    }
+
     // -----------------------------------------------------------------------
     // Scope management
     // -----------------------------------------------------------------------
 
-    private void pushScope() {
-        scopes.push(new LinkedHashMap<>());
-    }
-
-    private void popScope() {
-        if (!scopes.isEmpty()) scopes.pop();
-    }
+    private void pushScope() { scopes.push(new LinkedHashMap<>()); }
+    private void popScope()  { if (!scopes.isEmpty()) scopes.pop(); }
 
     private void declareVariable(String name, TypeNode type) {
         if (name == null || scopes.isEmpty()) return;
         scopes.peek().put(name, type != null ? type : UNKNOWN);
     }
 
-    /**
-     * Looks up a variable name in the scope stack (inner → outer).
-     * Returns {@link #UNKNOWN} (with name {@code "Any"}) when not found,
-     * matching the convention used by {@link TypeChecker}.
-     */
     private TypeNode resolveVariable(String name) {
-        for (Map<String, TypeNode> scope : scopes) {
-            TypeNode t = scope.get(name);
-            if (t != null) return t;
+        for (TypeNode t : scopes.stream()
+                .map(m -> m.get(name))
+                .filter(Objects::nonNull)
+                .toList()) {
+            return t;
         }
         return UNKNOWN;
     }
 
     /**
-     * Resolves a simple (unqualified) name against the global declaration table.
+     * Resolves a top-level declaration by name, first from {@link #globals},
+     * then from imported modules via the {@link ModuleResolver}.
      * Falls back to {@code null} when not found.
      */
     private Declaration resolve(String name) {

@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="16" height="16">
+  <defs>
+    <linearGradient id="a-grad" x1="0%" y1="100%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#38BDF8"/>
+      <stop offset="100%" stop-color="#818CF8"/>
+    </linearGradient>
+    <linearGradient id="aurora-grad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#34D399"/>
+      <stop offset="50%" stop-color="#2DD4BF"/>
+      <stop offset="100%" stop-color="#38BDF8"/>
+    </linearGradient>
+  </defs>
+
+  <path d="M2.5 14 L8 1.5 L13.5 14" fill="none" stroke="url(#a-grad)" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/>
+  
+  <path d="M2 10 C 5 6, 11 14, 14 10" fill="none" stroke="url(#aurora-grad)" stroke-width="1.4" stroke-linecap="round"/>
+</svg>

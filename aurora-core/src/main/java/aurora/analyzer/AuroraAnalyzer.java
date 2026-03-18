@@ -34,15 +34,20 @@ public final class AuroraAnalyzer {
         }
 
         if (program != null) {
-            if (modules != null) {
-                try {
-                    ASTPostProcessor.process(program, modules);
-                } catch (Exception e) {
-                    String msg = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
-                    diagnostics.add(AuroraDiagnostic.error(null, "Post-processing error: " + msg, SOURCE_INTERNAL));
-                }
+            // Phase 1+2: type inference and ReturnStmt rewrite.
+            // ASTPostProcessor runs TypeInferenceEngine internally; diagnostics it
+            // produces (e.g. "both operands have unknown types") are retrieved via
+            // ASTPostProcessor.getLastDiagnostics() immediately after the call.
+            try {
+                ASTPostProcessor.process(program, modules);
+                // Collect diagnostics emitted by TypeInferenceEngine during inference.
+                diagnostics.addAll(ASTPostProcessor.getLastDiagnostics());
+            } catch (Exception e) {
+                String msg = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
+                diagnostics.add(AuroraDiagnostic.error(null, "Post-processing error: " + msg, SOURCE_INTERNAL));
             }
 
+            // Phase 3: full type checking pass.
             try {
                 TypeChecker typeChecker = new TypeChecker(program, modules);
                 typeChecker.visitProgram(program);
