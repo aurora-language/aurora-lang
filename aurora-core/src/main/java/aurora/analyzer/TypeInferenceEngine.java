@@ -689,9 +689,7 @@ public final class TypeInferenceEngine {
             elemType = inferExpr(e.elements.getFirst());
         }
         // Return type as "elemType[]" – represented by adding an Array suffix.
-        TypeNode arrType = new TypeNode(e.loc, elemType.name,
-                List.of(), List.of(new TypeNode.TypeSuffix.Array()));
-        return arrType;
+        return new TypeNode(e.loc, e.loc, elemType.name, List.of(), List.of(new TypeNode.TypeSuffix.Array()));
     }
 
     private TypeNode inferIndex(IndexExpr e) {
@@ -701,7 +699,7 @@ public final class TypeInferenceEngine {
         if (obj.suffixes != null && !obj.suffixes.isEmpty()) {
             List<TypeNode.TypeSuffix> rest =
                     obj.suffixes.subList(0, obj.suffixes.size() - 1);
-            return new TypeNode(e.loc, obj.name, obj.typeArguments, rest);
+            return new TypeNode(e.loc, e.loc, obj.name, obj.typeArguments, rest);
         }
         return UNKNOWN;
     }
@@ -737,7 +735,7 @@ public final class TypeInferenceEngine {
         if (t.suffixes != null && !t.suffixes.isEmpty()) {
             List<TypeNode.TypeSuffix> rest =
                     t.suffixes.subList(0, t.suffixes.size() - 1);
-            return new TypeNode(t.loc, t.name, t.typeArguments, rest);
+            return new TypeNode(t.loc, t.nameLoc, t.name, t.typeArguments, rest);
         }
         return UNKNOWN;
     }

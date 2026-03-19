@@ -81,11 +81,9 @@ subprojects {
 }
 
 dependencies {
-    subprojects.each {
-        if (it.name != 'aurora-intellij') {
-            implementation it
-        }
-    }
+    implementation project("aurora-core")
+    implementation project("aurora-lsp")
+    implementation project("aurora-cli")
 }
 
 shadowJar {

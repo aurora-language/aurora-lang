@@ -463,8 +463,7 @@ public class VM {
                         break;
                     }
                     case PRINT: {
-                        System.out.println(stack.pop());
-                        break;
+                        throw new RuntimeException("Debug PRINT Opcode disabled");
                     }
                     case TRUE:
                         stack.push(ArBool.TRUE);
@@ -556,15 +555,15 @@ public class VM {
                         int index = frame.chunk.code[frame.pc];
                         frame.pc++;
                         ArObject val = frame.get(index);
-                        System.out.println("[DEBUG] GET_LOCAL index=" + index + " val=" + val);
+                        //System.out.println("[DEBUG] GET_LOCAL index=" + index + " val=" + val);
                         stack.push(val);
                         break;
                     }
                     case SET_LOCAL: {
                         int index = frame.chunk.code[frame.pc];
                         frame.pc++;
-                        System.out.println("[DEBUG] SET_LOCAL index=" + index + " val=" +
-                        stack.peek());
+                        //System.out.println("[DEBUG] SET_LOCAL index=" + index + " val=" +
+                        stack.peek();
                         frame.set(index, stack.peek());
                         break;
                     }
@@ -587,8 +586,7 @@ public class VM {
                         break;
                     }
                     case JUMP: {
-                        int offset = frame.chunk.code[frame.pc];
-                        frame.pc = offset;
+                        frame.pc = frame.chunk.code[frame.pc];
                         break;
                     }
                     case JUMP_IF_FALSE: {

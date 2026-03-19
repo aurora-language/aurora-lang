@@ -51,12 +51,7 @@ pub class RangeIterator<out T default int> : Iterator<T> {
         self._current = range.min()
     }
 
-    pub override fun hasNext() -> bool =>
-        if _exc {
-            return _current < _max
-        } else {
-            return _current <= _max
-        }
+    pub override fun hasNext() -> bool => if _exc _current < _max else _current <= max
 
     pub override fun next() -> T {
         val value = _current

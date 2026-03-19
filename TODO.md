@@ -1,7 +1,7 @@
 # Aurora VM & Language Implementation Tasks
 
 ## Phase 2: Control Flow & Advanced Types
-- [ ] Complete `throw` support (Compiler -> VM emission).
+- [x] Complete `throw` support (Compiler -> VM emission).
   - ⚠️ `visitThrowStmt` is empty in Compiler.java. `THROW` opcode exists in VM but is never emitted.
 - [ ] Add support for `DestructurePattern` in records (match expression).
 - [ ] Implement `record` type (Compiler implementation needed).
@@ -22,6 +22,7 @@
     - [ ] Task scheduler implementation (event loop).
 
 ## Phase 4: Standard Library & Ecosystem
+## This phase runs after completes the new VM written in rust
 - [ ] Implement `Collections` module (List, Map, Set).
   - ⚠️ Trait definitions exist in `Collections.ar` but no implementation classes.
 - [ ] Implement `Math` module (abs, sin, cos, etc.).
@@ -29,6 +30,7 @@
 - [ ] Implement `Http` module (Async client).
 
 ## Phase 5: Optimization & Internals
+- Supplement: Java implementation is made for early developing, so performance optimization are currently not required
 - [ ] Optimize VM loop (Switch-table optimization).
 - [ ] Improve stack management (Register-based VM experimentation?).
 - [ ] Refine module loader (Caching, circular dependency resolution).
@@ -57,12 +59,13 @@
     - [ ] Namespace support: `object` definable inside any namespace, resolved via `use`.
 
 ## Phase 8: Known Issues & Bugs
-- [ ] Compiler: `visitElvisExpr` is empty — Elvis operator (`?:`) produces no bytecode.
-- [ ] Compiler: `visitThrowStmt` is empty — `throw` statements are silently ignored.
-- [ ] Compiler: `visitTryStmt` and `visitTryStmtCatch` are empty — try/catch blocks are not compiled.
-- [ ] TypeChecker: `visitThrowStmt` calls `inherits(throwable, "")` with an empty string — Throwable check never works.
+- [x] Compiler: `visitElvisExpr` is empty — Elvis operator (`?:`) produces no bytecode.
+- [x] Compiler: `visitThrowStmt` is empty — `throw` statements are silently ignored.
+- [x] Compiler: `visitTryStmt` and `visitTryStmtCatch` are empty — try/catch blocks are not compiled.
+- [x] TypeChecker: `visitThrowStmt` calls `inherits(throwable, "")` with an empty string — Throwable check never works.
 - [ ] VM: Improve error reporting for ClassCastException in `as` operator.
 - [ ] Refactor: `NodeFinder` is duplicated across `aurora.lsp` and `aurora.analyzer` packages.
+- [ ] TypeChecker: Output error `Thrown type 'RuntimeError' must inherit from Throwable` for failing to resolve RuntimeError inheritance
 
 ## Phase 9: Language Design Improvements
 - [ ] **#1 Remove generic type erasure** (reified generics)
@@ -90,3 +93,18 @@
     - [ ] `lazy` → keep as compiler keyword (deferred assignment for local variables, no runtime overhead).
     - [ ] `expect` → remove keyword; move to `Result.expect(msg)` standard library method.
 - [x] **#8 Nested block comments** — `commentDepth` counter and push/pop mode implemented in `AuroraLexer.g4`.
+
+## シンタックスハイライトの問題
+- if式の中身に色がつかない
+  - (例) if exc v >= min && v < max else v >= min && v <= max
+- Range.ar:25
+  - pub override fun iterator() -> Iterator<T> => RangeIterator<T>(self)
+  - この関数の戻り値の型(Iterator<T>)の部分で、<>にまで色がついてしまっている、また他にもそうなってしまっている部分がいくつかある
+    - constructor(range: Range<T>) パラメーターの型アノテーションの部分
+    - pub class RangeIterator<out T default int> : Iterator<T> 継承しているIterator<T>の部分
+    - RangeIterator<T>(self)の型の部分の色(RangeIterator,T)が青になっている
+- (Reference)Error.ar
+  - pub class ReferenceError(reason: string) : RuntimeError(reason)
+  - pub class RuntimeError(reason: string) : Error(reason) {}
+  - 両者とも()や:など記号以外がキーワード含めすべて青になってしまっている
+- これらの原因はおそらくほぼ確定でAuroraParserのシンタックスシュガー解決にあります。なので、SemanticTokenVisitorはどちらにせよ行うのはハイライトだけなので一部をAuroraParserから流用しつつANTLR4のVisitorを使うのが最適だと思われます。

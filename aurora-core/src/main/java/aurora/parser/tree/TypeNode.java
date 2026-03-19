@@ -12,6 +12,8 @@ import java.util.stream.Collectors;
  * This can be a primitive type, a class name, or a complex type with generic arguments and suffixes.
  */
 public class TypeNode extends Node {
+    public final SourceLocation nameLoc;
+
     /** The name of the type (e.g., "int", "List"). */
     public final String name;
 
@@ -32,16 +34,36 @@ public class TypeNode extends Node {
      * @param typeArguments The generic arguments.
      * @param suffixes      The type suffixes.
      */
-    public TypeNode(SourceLocation loc, String name, List<TypeNode> typeArguments, List<TypeSuffix> suffixes) {
+    public TypeNode(SourceLocation loc, SourceLocation nameLoc, String name, List<TypeNode> typeArguments, List<TypeSuffix> suffixes) {
         super(loc);
+        this.nameLoc = nameLoc;
         this.name = name;
         this.typeArguments = typeArguments != null ? typeArguments : Collections.emptyList();
         this.suffixes = suffixes != null ? suffixes : Collections.emptyList();
         this.primitive = isPrimitive(name);
     }
 
+    public TypeNode(SourceLocation loc, SourceLocation nameLoc, String name) {
+        super(loc);
+        this.nameLoc = nameLoc;
+        this.name = name;
+        this.typeArguments = Collections.emptyList();
+        this.suffixes = Collections.emptyList();
+        this.primitive = isPrimitive(name);
+    }
+
+    public TypeNode(SourceLocation loc, String name) {
+        super(loc);
+        this.nameLoc = loc;
+        this.name = name;
+        this.typeArguments = Collections.emptyList();
+        this.suffixes = Collections.emptyList();
+        this.primitive = isPrimitive(name);
+    }
+
     public TypeNode(SourceLocation loc) {
         super(loc);
+        this.nameLoc = loc;
         this.name = "none";
         this.typeArguments = Collections.emptyList();
         this.suffixes = Collections.emptyList();
@@ -50,15 +72,11 @@ public class TypeNode extends Node {
 
     public TypeNode() {
         super(new SourceLocation());
+        this.nameLoc = new SourceLocation();
         this.name = "none";
         this.typeArguments = Collections.emptyList();
         this.suffixes = Collections.emptyList();
         this.primitive = true;
-    }
-
-    // Constructor for simple types (backwards compatibility and convenience)
-    public TypeNode(SourceLocation loc, String name) {
-        this(loc, name, Collections.emptyList(), Collections.emptyList());
     }
 
     public static class Lambda extends TypeNode {
@@ -66,7 +84,7 @@ public class TypeNode extends Node {
         public final TypeNode ret;
 
         public Lambda(SourceLocation loc, List<TypeNode> params, TypeNode ret) {
-            super(loc, "<lambda>");
+            super(loc, loc, "<lambda>");
             this.params = params;
             this.ret = ret;
         }

@@ -1264,16 +1264,19 @@ public class AuroraParser extends AuroraParserBaseVisitor<Node> {
             }
         }
 
-        return new TypeNode(loc(ctx), baseType.name, baseType.typeArguments, suffixes);
+        return new TypeNode(loc(ctx), baseType.nameLoc, baseType.name, baseType.typeArguments, suffixes);
     }
 
     @Override
     public Node visitSimpleType(SimpleTypeContext ctx) {
         String name;
+        SourceLocation nameLoc;
         if (ctx.primitiveType() != null) {
             name = ctx.primitiveType().getText();
+            nameLoc = loc(ctx.primitiveType());
         } else if (ctx.qualifiedName() != null) {
             name = ctx.qualifiedName().getText();
+            nameLoc = loc(ctx.qualifiedName());
         } else if (ctx.lambdaType() != null) {
             return visitLambdaType(ctx.lambdaType());
         } else {
@@ -1285,7 +1288,7 @@ public class AuroraParser extends AuroraParserBaseVisitor<Node> {
             typeArgs = getTypeList(ctx.genericArguments().typeTypeList());
         }
 
-        return new TypeNode(loc(ctx), name, typeArgs, Collections.emptyList());
+        return new TypeNode(loc(ctx), nameLoc, name, typeArgs, Collections.emptyList());
     }
 
     @Override

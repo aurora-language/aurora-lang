@@ -41,6 +41,8 @@ public class TypeChecker implements NodeVisitor<TypeNode> {
     /** Built-in "none" (null) type. */
     private final TypeNode NONE;
 
+    private ClassDecl currentClass = null;
+
     /**
      * Initializes a new TypeChecker for the specified program.
      *
@@ -512,7 +514,7 @@ public class TypeChecker implements NodeVisitor<TypeNode> {
 
         if (t.suffixes != null && !t.suffixes.isEmpty()) {
             List<TypeNode.TypeSuffix> rest = t.suffixes.subList(0, t.suffixes.size() - 1);
-            return new TypeNode(t.loc, t.name, t.typeArguments, rest);
+            return new TypeNode(t.loc, t.nameLoc, t.name, t.typeArguments, rest);
         }
 
         Node typeDecl = SymbolResolver.resolveTypeName(currentProgram, t.name, modules);
@@ -649,6 +651,8 @@ public class TypeChecker implements NodeVisitor<TypeNode> {
 
     @Override
     public TypeNode visitClassDecl(ClassDecl decl) {
+        ClassDecl previousClass = currentClass;
+        currentClass = decl;
         beginScope(); // Class scope
         if (decl.members != null) {
             for (Declaration member : decl.members) {
@@ -668,6 +672,7 @@ public class TypeChecker implements NodeVisitor<TypeNode> {
             }
         }
         endScope();
+        currentClass = previousClass;
         return NONE;
     }
 
@@ -883,6 +888,13 @@ public class TypeChecker implements NodeVisitor<TypeNode> {
             argTypes.add(visitExpr(arg.value));
         }
 
+        if (expr.callee instanceof SuperExpr) {
+            if (currentClass != null && currentClass.superClass != null) {
+                return new TypeNode(expr.loc, currentClass.superClass.name);
+            }
+            return ANY;
+        }
+
         if (expr.callee instanceof AccessExpr access && access.object != null) {
             TypeNode receiverType = visitExpr(access.object);
             if (!receiverType.name.equals("Any")) {
@@ -926,7 +938,7 @@ public class TypeChecker implements NodeVisitor<TypeNode> {
             }
         }
 
-        reportWarn(expr, "Unable to inference");
+        reportWarn(expr, "Internal: CallExpr: Unable to inference");
         return ANY;
     }
 
@@ -961,7 +973,7 @@ public class TypeChecker implements NodeVisitor<TypeNode> {
             }
         }
 
-        reportWarn(expr, "Unable to inference");
+        reportWarn(expr, "Unable to inference: " + expr.getClass().getName());
         return ANY;
     }
 
@@ -987,7 +999,7 @@ public class TypeChecker implements NodeVisitor<TypeNode> {
             return elementType;
         }
 
-        reportWarn(expr, "Unable to inference");
+        reportWarn(expr, "Unable to inference: " + expr.getClass().getName());
         return ANY;
     }
 
