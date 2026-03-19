@@ -195,6 +195,8 @@ public class Compiler implements NodeVisitor<Void> {
             return visitLoopStmt((LoopStmt) stmt);
         if (stmt instanceof ControlStmt)
             return visitControlStmt((ControlStmt) stmt);
+        if (stmt instanceof TryStmt)
+            return visitTryStmt((TryStmt) stmt);
 
         throw new UnsupportedOperationException("Statement type not supported: " + stmt.getClass().getSimpleName());
     }
@@ -369,6 +371,12 @@ public class Compiler implements NodeVisitor<Void> {
             return visitMatchExpr((MatchExpr) expr);
         if (expr instanceof RangeExpr)
             return visitRangeExpr((RangeExpr) expr);
+        if (expr instanceof ElvisExpr)
+            return visitElvisExpr((ElvisExpr) expr);
+        if (expr instanceof ThreadExpr)
+            return visitThreadExpr((ThreadExpr) expr);
+        if (expr instanceof AwaitExpr)
+            return visitAwaitExpr((AwaitExpr) expr);
         throw new UnsupportedOperationException("Expression type not supported: " + expr.getClass().getSimpleName());
     }
 
@@ -1160,7 +1168,8 @@ public class Compiler implements NodeVisitor<Void> {
 
     /**
      * Visits a 'while' loop.
-     * Generates code that checks the condition, jumps to exit if false, executes body,
+     * Generates code that checks the condition, jumps to exit if false, executes
+     * body,
      * and then jumps back to the condition.
      *
      * @param stmt The while statement AST node.
@@ -1171,10 +1180,10 @@ public class Compiler implements NodeVisitor<Void> {
         // while (condition) { body }
         //
         // loopStart:
-        //   <condition>
-        //   JUMP_IF_FALSE -> exitLoop
-        //   <body>
-        //   JUMP -> loopStart        (continue target)
+        // <condition>
+        // JUMP_IF_FALSE -> exitLoop
+        // <body>
+        // JUMP -> loopStart (continue target)
         // exitLoop:
 
         int loopStart = chunk.count;
@@ -1221,10 +1230,10 @@ public class Compiler implements NodeVisitor<Void> {
         // repeat { body } until (condition)
         //
         // loopStart:
-        //   <body>
+        // <body>
         // continueTarget:
-        //   <condition>
-        //   JUMP_IF_FALSE -> loopStart
+        // <condition>
+        // JUMP_IF_FALSE -> loopStart
         // exitLoop:
 
         int loopStart = chunk.count;
@@ -1278,7 +1287,10 @@ public class Compiler implements NodeVisitor<Void> {
      * Compiles a for-loop that iterates over a range expression (e.g., {@code start..end}).
      * This is optimized to use a simple counter instead of creating a Range object.
      *
-     * <p>Internal logic breakdown:</p>
+     * <p>
+     * Internal logic breakdown:
+     * </p>
+     * 
      * <pre>
      * &lt;start&gt; -> SET_LOCAL $varName
      * &lt;end&gt;   -> SET_LOCAL $end
@@ -1488,14 +1500,157 @@ public class Compiler implements NodeVisitor<Void> {
         }
     }
 
+    /**
+     * Compiles a try-catch-finally statement.
+     *
+     * <p>
+     * Emits a {@code TRY <catchPc>} opcode that registers a handler in the current
+     * frame.
+     * When an exception reaches the VM's {@code handleException}, it restores the
+     * operand stack
+     * to the saved depth and pushes the caught Aurora object, then jumps to
+     * {@code catchPc}.
+     * Multiple catch clauses are chained with type checks ({@code IS}) and
+     * conditional jumps.
+     * A {@code finally} block, if present, is inlined into both the normal and
+     * exception paths.
+     * </p>
+     *
+     * @param stmt The try statement AST node.
+     * @return {@code null}.
+     */
     @Override
     public Void visitTryStmt(TryStmt stmt) {
+        int line = stmt.loc.line(), col = stmt.loc.column();
+
+        // --- try block ---
+        // Emit TRY with a placeholder for the catch PC.
+        chunk.write(OpCode.TRY.ordinal(), line, col);
+        int tryHandlerIdx = chunk.count;
+        chunk.write(0, line, col); // placeholder: patched to first catch entry
+
+        visitBlockStmt(stmt.tryBlock);
+
+        // Normal exit: pop the handler, jump past all catch blocks.
+        chunk.write(OpCode.END_TRY.ordinal(), line, col);
+
+        // Inline finally (normal path) before the jump past catches.
+        if (stmt.finallyBlock != null) {
+            visitBlockStmt(stmt.finallyBlock);
+        }
+
+        chunk.write(OpCode.JUMP.ordinal(), line, col);
+        int jumpPastCatches = chunk.count;
+        chunk.write(0, line, col); // placeholder: patched to end
+
+        // --- catch clauses ---
+        // Patch TRY handler to here (start of catch dispatch).
+        chunk.code[tryHandlerIdx] = chunk.count;
+
+        if (stmt.catches.isEmpty()) {
+            // No catch clauses, just a finally block.
+            // The exception object is on the stack; pop and run finally, then re-throw.
+            if (stmt.finallyBlock != null) {
+                // Save exception to a hidden local, run finally, then re-throw.
+                beginScope();
+                String exName = "$ex_" + chunk.count;
+                addLocal(exName);
+                int exIdx = resolveLocal(exName);
+                chunk.write(OpCode.SET_LOCAL.ordinal(), line, col);
+                chunk.write(exIdx, line, col);
+                chunk.write(OpCode.POP.ordinal(), line, col);
+
+                visitBlockStmt(stmt.finallyBlock);
+
+                chunk.write(OpCode.GET_LOCAL.ordinal(), line, col);
+                chunk.write(exIdx, line, col);
+                chunk.write(OpCode.THROW.ordinal(), line, col);
+                endScope(line);
+            } else {
+                // Re-throw immediately.
+                chunk.write(OpCode.THROW.ordinal(), line, col);
+            }
+        } else {
+            // The caught exception object is on top of the stack at this point.
+            // Save it to a hidden local for type-checking across clauses.
+            beginScope();
+            String exName = "$ex_" + chunk.count;
+            addLocal(exName);
+            int exIdx = resolveLocal(exName);
+            chunk.write(OpCode.SET_LOCAL.ordinal(), line, col);
+            chunk.write(exIdx, line, col);
+            chunk.write(OpCode.POP.ordinal(), line, col);
+
+            List<Integer> jumpsToEnd = new ArrayList<>();
+
+            for (TryStmt.CatchClause clause : stmt.catches) {
+                int clauseLine = clause.block().loc.line();
+
+                // Type check: load exception and check IS <type>
+                chunk.write(OpCode.GET_LOCAL.ordinal(), clauseLine, col);
+                chunk.write(exIdx, clauseLine, col);
+
+                String typeName = clause.type() != null ? clause.type().name : "object";
+                int typeNameIdx = chunk.addConstant(typeName);
+                chunk.write(OpCode.GET_GLOBAL.ordinal(), clauseLine, col);
+                chunk.write(typeNameIdx, clauseLine, col);
+                chunk.write(OpCode.IS.ordinal(), clauseLine, col);
+
+                chunk.write(OpCode.JUMP_IF_FALSE.ordinal(), clauseLine, col);
+                int jumpToNext = chunk.count;
+                chunk.write(0, clauseLine, col); // patched to next clause
+
+                // Bind the exception to the catch variable.
+                beginScope();
+                addLocal(clause.var());
+                int varIdx = resolveLocal(clause.var());
+                chunk.write(OpCode.GET_LOCAL.ordinal(), clauseLine, col);
+                chunk.write(exIdx, clauseLine, col);
+                chunk.write(OpCode.SET_LOCAL.ordinal(), clauseLine, col);
+                chunk.write(varIdx, clauseLine, col);
+                chunk.write(OpCode.POP.ordinal(), clauseLine, col);
+
+                visitBlockStmt(clause.block());
+                endScope(clauseLine);
+
+                // Inline finally (exception path) after each catch body.
+                if (stmt.finallyBlock != null) {
+                    visitBlockStmt(stmt.finallyBlock);
+                }
+
+                chunk.write(OpCode.JUMP.ordinal(), clauseLine, col);
+                jumpsToEnd.add(chunk.count);
+                chunk.write(0, clauseLine, col); // patched to end
+
+                chunk.code[jumpToNext] = chunk.count;
+            }
+
+            // No catch matched — re-throw.
+            chunk.write(OpCode.GET_LOCAL.ordinal(), line, col);
+            chunk.write(exIdx, line, col);
+
+            if (stmt.finallyBlock != null) {
+                visitBlockStmt(stmt.finallyBlock);
+            }
+
+            chunk.write(OpCode.THROW.ordinal(), line, col);
+
+            endScope(line);
+
+            for (int j : jumpsToEnd) {
+                chunk.code[j] = chunk.count;
+            }
+        }
+
+        // Patch the jump past catch clauses to here.
+        chunk.code[jumpPastCatches] = chunk.count;
+
         return null;
     }
 
     @Override
     public Void visitTryStmtCatch(TryStmt.CatchClause catchClause) {
-        return null;
+        return null; // Handled inline by visitTryStmt
     }
 
     /**
@@ -1593,8 +1748,17 @@ public class Compiler implements NodeVisitor<Void> {
         return null;
     }
 
+    /**
+     * Visits a throw statement.
+     * Evaluates the exception expression and emits the {@code THROW} opcode.
+     *
+     * @param stmt The throw statement AST node.
+     * @return {@code null}.
+     */
     @Override
     public Void visitThrowStmt(ControlStmt.ThrowStmt stmt) {
+        visitExpr(stmt.value);
+        chunk.write(OpCode.THROW.ordinal(), stmt.loc.line(), stmt.loc.column());
         return null;
     }
 
@@ -1829,14 +1993,139 @@ public class Compiler implements NodeVisitor<Void> {
         return null;
     }
 
+    /**
+     * Visits an enum declaration.
+     *
+     * <p>
+     * Compiles an enum by creating an {@code ArClass} representing the enum type
+     * and
+     * an {@code ArInstance} of that class for each member. Each member instance is
+     * stored
+     * as a global under {@code "EnumName"} (the class itself) and
+     * {@code "EnumName::MemberName"} (the member value) to support
+     * {@code Mode::Read} access.
+     * Numeric ordinal values are stored in a field named {@code "ordinal"} on each
+     * instance.
+     * If a member declares an explicit integer value via {@code = expr}, that value
+     * is used;
+     * otherwise ordinals are assigned sequentially from 0.
+     * </p>
+     *
+     * @param decl The enum declaration AST node.
+     * @return {@code null}.
+     */
     @Override
     public Void visitEnumDecl(EnumDecl decl) {
+        String fullName = fqn(decl.name);
+        int line = decl.loc.line(), col = decl.loc.column();
+
+        // 1. Create the enum class object and register it as a global.
+        CompiledClass enumClass = new CompiledClass(fullName);
+        enumClass.isEnum = true;
+
+        int clsIdx = chunk.addConstant(enumClass);
+        int fqnIdx = chunk.addConstant(fullName);
+
+        chunk.write(OpCode.LOAD_CONST.ordinal(), line, col);
+        chunk.write(clsIdx, line, col);
+        chunk.write(OpCode.SET_GLOBAL.ordinal(), line, col);
+        chunk.write(fqnIdx, line, col);
+        chunk.write(OpCode.POP.ordinal(), line, col);
+
+        if (!fullName.equals(decl.name)) {
+            int simpleIdx = chunk.addConstant(decl.name);
+            chunk.write(OpCode.LOAD_CONST.ordinal(), line, col);
+            chunk.write(clsIdx, line, col);
+            chunk.write(OpCode.SET_GLOBAL.ordinal(), line, col);
+            chunk.write(simpleIdx, line, col);
+            chunk.write(OpCode.POP.ordinal(), line, col);
+        }
+
+        // 2. Create one instance per member and register as "EnumName::MemberName".
+        int nextOrdinal = 0;
+        for (EnumDecl.EnumMember member : decl.members) {
+            int memberLine = member.loc.line();
+
+            // Push the enum class, call NEW with 0 args to create instance.
+            chunk.write(OpCode.GET_GLOBAL.ordinal(), memberLine, col);
+            chunk.write(fqnIdx, memberLine, col);
+            chunk.write(OpCode.NEW.ordinal(), memberLine, col);
+            chunk.write(0, memberLine, col);
+
+            // Set the built-in "name" field.
+            String namePropName = "name";
+            int memberNameIdx = chunk.addConstant(member.name);
+            int namePropIdx = chunk.addConstant(namePropName);
+
+            // Duplicate instance on stack: SET_PROPERTY pops the instance,
+            // so we use GET/SET pattern via a hidden local.
+            String hiddenLocal = "$enum_" + decl.name + "_" + member.name;
+            beginScope();
+            addLocal(hiddenLocal);
+            int hiddenIdx = resolveLocal(hiddenLocal);
+
+            chunk.write(OpCode.SET_LOCAL.ordinal(), memberLine, col);
+            chunk.write(hiddenIdx, memberLine, col);
+            chunk.write(OpCode.POP.ordinal(), memberLine, col);
+
+            // Set "name" field.
+            chunk.write(OpCode.GET_LOCAL.ordinal(), memberLine, col);
+            chunk.write(hiddenIdx, memberLine, col);
+            chunk.write(OpCode.LOAD_CONST.ordinal(), memberLine, col);
+            chunk.write(memberNameIdx, memberLine, col);
+            chunk.write(OpCode.SET_PROPERTY.ordinal(), memberLine, col);
+            chunk.write(namePropIdx, memberLine, col);
+            chunk.write(OpCode.POP.ordinal(), memberLine, col);
+
+            // Set "ordinal" field.
+            int ordinalVal;
+            if (member.value instanceof LiteralExpr litExpr &&
+                    (litExpr.type == LiteralExpr.LiteralType.INT || litExpr.type == LiteralExpr.LiteralType.LONG)) {
+                ordinalVal = ((Number) litExpr.value).intValue();
+                nextOrdinal = ordinalVal + 1;
+            } else {
+                ordinalVal = nextOrdinal++;
+            }
+            int ordinalConstIdx = chunk.addConstant(ordinalVal);
+            int ordinalPropIdx = chunk.addConstant("ordinal");
+
+            chunk.write(OpCode.GET_LOCAL.ordinal(), memberLine, col);
+            chunk.write(hiddenIdx, memberLine, col);
+            chunk.write(OpCode.LOAD_CONST.ordinal(), memberLine, col);
+            chunk.write(ordinalConstIdx, memberLine, col);
+            chunk.write(OpCode.SET_PROPERTY.ordinal(), memberLine, col);
+            chunk.write(ordinalPropIdx, memberLine, col);
+            chunk.write(OpCode.POP.ordinal(), memberLine, col);
+
+            // Register as global: "EnumName::MemberName" and "EnumName.MemberName".
+            String memberQName = fullName + "::" + member.name;
+            int memberQNameIdx = chunk.addConstant(memberQName);
+
+            chunk.write(OpCode.GET_LOCAL.ordinal(), memberLine, col);
+            chunk.write(hiddenIdx, memberLine, col);
+            chunk.write(OpCode.SET_GLOBAL.ordinal(), memberLine, col);
+            chunk.write(memberQNameIdx, memberLine, col);
+            chunk.write(OpCode.POP.ordinal(), memberLine, col);
+
+            if (!fullName.equals(decl.name)) {
+                String simpleMemberQName = decl.name + "::" + member.name;
+                int simpleMemberQNameIdx = chunk.addConstant(simpleMemberQName);
+                chunk.write(OpCode.GET_LOCAL.ordinal(), memberLine, col);
+                chunk.write(hiddenIdx, memberLine, col);
+                chunk.write(OpCode.SET_GLOBAL.ordinal(), memberLine, col);
+                chunk.write(simpleMemberQNameIdx, memberLine, col);
+                chunk.write(OpCode.POP.ordinal(), memberLine, col);
+            }
+
+            endScope(memberLine);
+        }
+
         return null;
     }
 
     @Override
     public Void visitEnumMember(EnumDecl.EnumMember member) {
-        return null;
+        return null; // Handled inline by visitEnumDecl
     }
 
     @Override
@@ -1917,6 +2206,7 @@ public class Compiler implements NodeVisitor<Void> {
 
         return null;
     }
+
     @Override
     public Void visitLambdaExpr(LambdaExpr expr) {
         Chunk parentChunk = this.chunk;
@@ -2030,8 +2320,76 @@ public class Compiler implements NodeVisitor<Void> {
         return null;
     }
 
+    /**
+     * Visits an Elvis (null-coalescing) expression ({@code left ?: right}).
+     *
+     * <p>
+     * Evaluates {@code left}. If it is not {@code none} (non-null), the result
+     * is {@code left}. Otherwise the result is {@code right}.
+     * The generated bytecode avoids evaluating {@code right} when {@code left} is
+     * already present (short-circuit evaluation).
+     *
+     * <p>
+     * Bytecode layout:
+     * 
+     * <pre>
+     *   &lt;left&gt;
+     *   SET_LOCAL $tmp          ; save left temporarily
+     *   POP
+     *   GET_LOCAL $tmp
+     *   GET_GLOBAL none
+     *   NOT_EQUAL               ; is left != none?
+     *   JUMP_IF_FALSE -&gt; useRight
+     *   GET_LOCAL $tmp          ; result = left
+     *   JUMP -&gt; end
+     * useRight:
+     *   &lt;right&gt;               ; result = right
+     * end:
+     * </pre>
+     *
+     * @param expr The Elvis expression AST node.
+     * @return {@code null}.
+     */
     @Override
     public Void visitElvisExpr(ElvisExpr expr) {
+        int line = expr.loc.line(), col = expr.loc.column();
+
+        // Evaluate left and stash in a hidden local.
+        visitExpr(expr.left);
+        beginScope();
+        String tmpName = "$elvis_" + chunk.count;
+        addLocal(tmpName);
+        int tmpIdx = resolveLocal(tmpName);
+        chunk.write(OpCode.SET_LOCAL.ordinal(), line, col);
+        chunk.write(tmpIdx, line, col);
+        chunk.write(OpCode.POP.ordinal(), line, col);
+
+        // Check: tmp != none
+        chunk.write(OpCode.GET_LOCAL.ordinal(), line, col);
+        chunk.write(tmpIdx, line, col);
+        int noneIdx = chunk.addConstant(null);
+        chunk.write(OpCode.LOAD_CONST.ordinal(), line, col);
+        chunk.write(noneIdx, line, col);
+        chunk.write(OpCode.NOT_EQUAL.ordinal(), line, col);
+
+        chunk.write(OpCode.JUMP_IF_FALSE.ordinal(), line, col);
+        int jumpToRight = chunk.count;
+        chunk.write(0, line, col); // placeholder
+
+        // Left is non-null: push it as the result.
+        chunk.write(OpCode.GET_LOCAL.ordinal(), line, col);
+        chunk.write(tmpIdx, line, col);
+        chunk.write(OpCode.JUMP.ordinal(), line, col);
+        int jumpToEnd = chunk.count;
+        chunk.write(0, line, col); // placeholder
+
+        // Left is null/none: evaluate right.
+        chunk.code[jumpToRight] = chunk.count;
+        visitExpr(expr.right);
+
+        chunk.code[jumpToEnd] = chunk.count;
+        endScope(line);
+
         return null;
     }
 

@@ -1,6 +1,6 @@
 @echo off
 setlocal
-set JAR_PATH=%~dp0build\libs\aurora-0.1.0.jar
+set JAR_PATH=%~dp0build\libs\aurora-0.1.0-alpha.jar
 set LIB_PATH=%~dp0aurora\lib
 
 if not exist "%JAR_PATH%" (

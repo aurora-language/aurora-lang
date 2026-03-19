@@ -67,7 +67,7 @@ public class AuroraTextDocumentService implements TextDocumentService {
         LspLogger.log("didOpen: " + uri);
         initProjectRoot(uri);
         hoverCache.keySet().removeIf(k -> k.startsWith(uri + ":"));
-        
+
         List<Diagnostic> cached = diagnosticsCache.get(uri);
         if (cached != null) {
             server.getClient().publishDiagnostics(new PublishDiagnosticsParams(uri, cached));

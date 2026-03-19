@@ -601,6 +601,10 @@ public class TypeChecker implements NodeVisitor<TypeNode> {
 
     @Override
     public TypeNode visitControlStmt(ControlStmt stmt) {
+        if (stmt instanceof ControlStmt.ReturnStmt r) return visitReturnStmt(r);
+        if (stmt instanceof ControlStmt.ThrowStmt t) return visitThrowStmt(t);
+        if (stmt instanceof ControlStmt.BreakStmt b) return visitBreakStmt(b);
+        if (stmt instanceof ControlStmt.ContinueStmt c) return visitContinueStmt(c);
         return ANY;
     }
 
@@ -613,9 +617,12 @@ public class TypeChecker implements NodeVisitor<TypeNode> {
 
     @Override
     public TypeNode visitThrowStmt(ControlStmt.ThrowStmt stmt) {
-        TypeNode throwable = visitExpr(stmt.value);
-        if (inherits(throwable, "")) {
-
+        TypeNode throwableType = visitExpr(stmt.value);
+        if (throwableType != null && throwableType != ANY) {
+            Node decl = SymbolResolver.resolveTypeName(currentProgram, throwableType.name, modules);
+            if (!inherits(decl, "Throwable")) {
+                reportError(stmt, "Thrown type '" + throwableType.name + "' must inherit from Throwable");
+            }
         }
         return ANY;
     }

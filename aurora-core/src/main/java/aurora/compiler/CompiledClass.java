@@ -27,6 +27,8 @@ public class CompiledClass {
 
     public boolean isTrait = false;
 
+    public boolean isEnum = false;
+
     /**
      * Constructs a new CompiledClass with the specified name.
      *
