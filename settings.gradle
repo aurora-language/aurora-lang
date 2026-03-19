@@ -1,7 +1,6 @@
 rootProject.name = "aurora"
 
 include(
-        "aurora-parser",
         "aurora-lsp",
         "aurora-cli",
         "aurora-intellij",

@@ -23,3 +23,11 @@ shadowJar {
 application {
     mainClass = "aurora.Main"
 }
+
+jar {
+    enabled = false
+}
+
+tasks.named('distZip') { dependsOn('shadowJar') }
+tasks.named('distTar') { dependsOn('shadowJar') }
+tasks.named('startScripts') { dependsOn('shadowJar') }

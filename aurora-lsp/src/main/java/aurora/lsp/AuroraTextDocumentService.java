@@ -62,7 +62,7 @@ public class AuroraTextDocumentService implements TextDocumentService {
     @Override
     public void didOpen(DidOpenTextDocumentParams params) {
         String uri = params.getTextDocument().getUri();
-        AuroraLanguageServer.LOGGER.info("didOpen: " + uri);
+        LspLogger.log("didOpen: " + uri);
         initProjectRoot(uri);
         hoverCache.keySet().removeIf(k -> k.startsWith(uri + ":"));
         validateDocument(uri, params.getTextDocument().getText());
@@ -78,8 +78,6 @@ public class AuroraTextDocumentService implements TextDocumentService {
         if (moduleResolver.getProjectRoot() != null)
             return;
         try {
-            // Derive project root from the document URI (walk up until we find aurora/lib
-            // or src)
             Path docPath = Paths.get(new URI(uri.replace("%3A", ":")));
             Path candidate = docPath.getParent();
             while (candidate != null) {
@@ -87,20 +85,20 @@ public class AuroraTextDocumentService implements TextDocumentService {
                         || candidate.resolve("pom.xml").toFile().exists()
                         || candidate.resolve("package.json").toFile().exists()) {
                     moduleResolver.setProjectRoot(candidate);
-                    AuroraLanguageServer.LOGGER.info("  projectRoot set to: " + candidate);
+                    LspLogger.log("  projectRoot set to: " + candidate);
                     return;
                 }
                 candidate = candidate.getParent();
             }
         } catch (Exception e) {
-            AuroraLanguageServer.LOGGER.error("  initProjectRoot failed", e);
+            LspLogger.error("  initProjectRoot failed", e);
         }
     }
 
     @Override
     public void didChange(DidChangeTextDocumentParams params) {
         String uri = params.getTextDocument().getUri();
-        AuroraLanguageServer.LOGGER.info("didChange: " + uri);
+        LspLogger.log("didChange: " + uri);
         hoverCache.keySet().removeIf(k -> k.startsWith(uri + ":"));
         validateDocument(uri, params.getContentChanges().getFirst().getText());
     }
@@ -200,26 +198,32 @@ public class AuroraTextDocumentService implements TextDocumentService {
             return;
 
         CompletionItem item = new CompletionItem(name);
-        if (decl instanceof FunctionDecl) {
-            item.setKind(CompletionItemKind.Function);
-            item.setDetail("fun " + name);
-        } else if (decl instanceof ClassDecl) {
-            item.setKind(CompletionItemKind.Class);
-            item.setDetail("class " + name);
-        } else if (decl instanceof InterfaceDecl) {
-            item.setKind(CompletionItemKind.Interface);
-            item.setDetail("trait " + name);
-        } else if (decl instanceof RecordDecl) {
-            item.setKind(CompletionItemKind.Struct);
-            item.setDetail("record " + name);
-        } else if (decl instanceof EnumDecl) {
-            item.setKind(CompletionItemKind.Enum);
-            item.setDetail("enum " + name);
-        } else if (decl instanceof FieldDecl field) {
-            item.setKind(CompletionItemKind.Field);
-            item.setDetail((field._static ? "static " : "") + field.declType.name().toLowerCase() + " " + name);
-        } else {
-            item.setKind(CompletionItemKind.Variable);
+        switch (decl) {
+            case FunctionDecl functionDecl -> {
+                item.setKind(CompletionItemKind.Function);
+                item.setDetail("fun " + name);
+            }
+            case ClassDecl classDecl -> {
+                item.setKind(CompletionItemKind.Class);
+                item.setDetail("class " + name);
+            }
+            case InterfaceDecl interfaceDecl -> {
+                item.setKind(CompletionItemKind.Interface);
+                item.setDetail("trait " + name);
+            }
+            case RecordDecl recordDecl -> {
+                item.setKind(CompletionItemKind.Struct);
+                item.setDetail("record " + name);
+            }
+            case EnumDecl enumDecl -> {
+                item.setKind(CompletionItemKind.Enum);
+                item.setDetail("enum " + name);
+            }
+            case FieldDecl field -> {
+                item.setKind(CompletionItemKind.Field);
+                item.setDetail((field._static ? "static " : "") + field.declType.name().toLowerCase() + " " + name);
+            }
+            default -> item.setKind(CompletionItemKind.Variable);
         }
         items.add(item);
     }
@@ -239,7 +243,7 @@ public class AuroraTextDocumentService implements TextDocumentService {
             return CompletableFuture.completedFuture(cached == EMPTY_HOVER ? null : cached);
         }
 
-        AuroraLanguageServer.LOGGER.info("hover request: uri={} line={} char={}  astMap.contains={}",
+        LspLogger.log("hover request: uri=%s line=%d char=%d  astMap.contains=%b",
                 uri, line, charPos, program != null);
 
         if (program == null) {
@@ -249,15 +253,15 @@ public class AuroraTextDocumentService implements TextDocumentService {
 
         NodeFinder finder = new NodeFinder(line, charPos);
         List<Node> path = finder.findPath(program);
-        Node node = (path != null && !path.isEmpty()) ? path.get(path.size() - 1) : null;
+        Node node = (path != null && !path.isEmpty()) ? path.getLast() : null;
 
-        AuroraLanguageServer.LOGGER.info("  NodeFinder result: pathSize={}  node={}",
+        LspLogger.log("  NodeFinder result: pathSize=%d  node=%s",
                 path != null ? path.size() : -1,
                 node != null ? node.getClass().getSimpleName() + " @ " + node.loc : "null");
 
         Node decl = SymbolResolver.resolve(node, path, program, moduleResolver);
 
-        AuroraLanguageServer.LOGGER.info("  SymbolResolver result: {}",
+        LspLogger.log("  SymbolResolver result: %s",
                 decl != null ? decl.getClass().getSimpleName() : "null");
 
         if (decl != null) {
@@ -306,7 +310,7 @@ public class AuroraTextDocumentService implements TextDocumentService {
             if (field.type != null && !field.type.name.equals("none"))
                 code.append(": ").append(field.type);
             else if (field.init != null)
-                code.append(" = ").append(field.init); // show inferred value hint
+                code.append(" = ").append(field.init);
 
         } else if (decl instanceof ParamDecl param) {
             code.append("(parameter) ").append(param.name);
@@ -323,7 +327,6 @@ public class AuroraTextDocumentService implements TextDocumentService {
                 code.append("<").append(cls.typeParams.stream().map(Object::toString).collect(Collectors.joining(", "))).append(">");
             if (cls.superClass != null)
                 code.append(" : ").append(cls.superClass);
-            // Show constructor signature(s) if available
             if (cls.members != null) {
                 for (Declaration member : cls.members) {
                     if (member instanceof ConstructorDecl ctor) {
@@ -381,7 +384,7 @@ public class AuroraTextDocumentService implements TextDocumentService {
      * then publishes diagnostics to the client.
      */
     private void validateDocument(String uri, String text) {
-        AuroraLanguageServer.LOGGER.info("validateDocument: {}  textLen={}", uri, text.length());
+        LspLogger.log("validateDocument: %s  textLen=%d", uri, text.length());
 
         AnalysisResult result = new AuroraAnalyzer().analyze(text, uri, moduleResolver);
 
@@ -389,7 +392,7 @@ public class AuroraTextDocumentService implements TextDocumentService {
             astMap.put(uri, result.program());
         }
 
-        AuroraLanguageServer.LOGGER.info("  analysis done: {} diagnostics", result.diagnostics().size());
+        LspLogger.log("  analysis done: %d diagnostics", result.diagnostics().size());
 
         List<Diagnostic> lspDiags = result.diagnostics().stream()
                 .map(AuroraTextDocumentService::toLspDiagnostic)
@@ -398,7 +401,7 @@ public class AuroraTextDocumentService implements TextDocumentService {
         try {
             server.getClient().publishDiagnostics(new PublishDiagnosticsParams(uri, lspDiags));
         } catch (Exception e) {
-            AuroraLanguageServer.LOGGER.error("Failed to publish diagnostics for " + uri, e);
+            LspLogger.error("Failed to publish diagnostics for " + uri, e);
         }
     }
 
@@ -414,7 +417,6 @@ public class AuroraTextDocumentService implements TextDocumentService {
             default          -> DiagnosticSeverity.Error;
         });
         if (d.location() != null) {
-            // SourceLocation は 1-based line、LSP は 0-based
             int startLine = Math.max(0, d.location().line() - 1);
             int startCol  = Math.max(0, d.location().column());
             int endLine   = Math.max(0, d.location().endLine() - 1);
@@ -430,7 +432,7 @@ public class AuroraTextDocumentService implements TextDocumentService {
     public CompletableFuture<SemanticTokens> semanticTokensFull(SemanticTokensParams params) {
         String uri = params.getTextDocument().getUri();
         Program program = astMap.get(uri);
-        AuroraLanguageServer.LOGGER.info("semanticTokensFull request for " + uri + " (AST exists: " + (program != null) + ")");
+        LspLogger.log("semanticTokensFull request for %s (AST exists: %b)", uri, program != null);
         if (program == null) {
             return CompletableFuture.completedFuture(new SemanticTokens(Collections.emptyList()));
         }
@@ -439,7 +441,7 @@ public class AuroraTextDocumentService implements TextDocumentService {
             List<Integer> tokens = SemanticTokenVisitor.getTokens(program, moduleResolver);
             return CompletableFuture.completedFuture(new SemanticTokens(tokens));
         } catch (Exception e) {
-            AuroraLanguageServer.LOGGER.error("Failed to generate semantic tokens for " + uri, e);
+            LspLogger.error("Failed to generate semantic tokens for " + uri, e);
             return CompletableFuture.completedFuture(new SemanticTokens(Collections.emptyList()));
         }
     }

@@ -12,7 +12,6 @@
             <option value="$PROJECT_DIR$/aurora-core" />
             <option value="$PROJECT_DIR$/aurora-intellij" />
             <option value="$PROJECT_DIR$/aurora-lsp" />
-            <option value="$PROJECT_DIR$/aurora-parser" />
           </set>
         </option>
       </GradleProjectSettings>

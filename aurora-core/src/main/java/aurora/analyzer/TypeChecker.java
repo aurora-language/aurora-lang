@@ -683,6 +683,7 @@ public class TypeChecker implements NodeVisitor<TypeNode> {
             for (ParamDecl p : decl.params)
                 declareVariable(p.name, p.type);
         }
+
         if (decl.body != null) {
             visitBlockStmt(decl.body);
         }
