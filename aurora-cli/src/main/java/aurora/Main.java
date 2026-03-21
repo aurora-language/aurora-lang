@@ -8,6 +8,7 @@ import aurora.lsp.AuroraLanguageServer;
 import aurora.parser.AuroraParser;
 import aurora.parser.SyntaxErrorException;
 import aurora.parser.tree.Program;
+import aurora.runtime.AuroraRuntimeException;
 import aurora.runtime.Chunk;
 import aurora.runtime.VM;
 import org.eclipse.lsp4j.jsonrpc.Launcher;
@@ -277,7 +278,7 @@ public final class Main implements Runnable {
                     System.err.print(formatDiagnostic(d, src));
                 }
                 return 1;
-            } catch (aurora.runtime.AuroraRuntimeException e) {
+            } catch (AuroraRuntimeException e) {
                 System.err.println("Uncaught Aurora Exception: " + e.getMessage());
                 if (verbose) {
                     System.err.println("\n--- Java Stack Trace ---");

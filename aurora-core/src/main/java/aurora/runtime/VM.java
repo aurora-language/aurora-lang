@@ -4,6 +4,7 @@ import aurora.analyzer.ModuleResolver;
 import aurora.compiler.CompiledClass;
 import aurora.compiler.CompiledFunction;
 import aurora.compiler.Compiler;
+import aurora.compiler.TypeErrorException;
 import aurora.parser.AuroraParser;
 import aurora.parser.tree.Program;
 import aurora.runtime.modules.ConcurrentModule;
@@ -11,6 +12,7 @@ import aurora.runtime.modules.IoModule;
 import aurora.runtime.modules.NativeModule;
 
 import java.io.DataInputStream;
+import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -393,26 +395,37 @@ public class VM {
     }
 
     private void loadRuntimeModules() {
+        // 1. Scan Aurora/Runtime
         for (Path root : shared.libraryPaths) {
             Path runtimeRoot = root.resolve("Aurora/Runtime");
             if (!Files.exists(runtimeRoot)) continue;
-
             try (Stream<Path> fs = Files.walk(runtimeRoot)) {
                 fs.filter(p -> p.toString().endsWith(".ar") || p.toString().endsWith(".arobj"))
                         .forEach(file -> {
                             Path rel = root.relativize(file);
                             String fqn = rel.toString()
-                                    .replace(java.io.File.separatorChar, '.')
+                                    .replace(File.separatorChar, '.')
                                     .replaceAll("\\.(ar|arobj)$", "");
                             try {
                                 loadModule(fqn);
                             } catch (AuroraRuntimeException e) {
-                                e.printStackTrace(System.err);
+                                System.err.println(e.getAuroraStackTrace());
                             }
                         });
             } catch (IOException ignored) {}
-
             break;
+        }
+
+        // 2. Load explicit implicit imports from Lib
+        for (String path : aurora.Lib.implicitImports) {
+            try {
+                loadModule(path);
+            } catch (AuroraRuntimeException e) {
+                System.err.println(e.getAuroraStackTrace());
+            } catch (TypeErrorException e) {
+                System.err.println(e.getMessage());
+                System.exit(1);
+            }
         }
     }
 
@@ -1056,8 +1069,7 @@ public class VM {
             }
         }
 
-        throw new AuroraRuntimeException("Module not found: " + moduleName
-                + " (searched: " + shared.libraryPaths + ")");
+        throw new AuroraRuntimeException("Module not found: " + moduleName + " (searched: " + shared.libraryPaths + ")");
     }
 
     private void loadArobj(Path path) {
@@ -1072,7 +1084,7 @@ public class VM {
             Chunk moduleChunk = loadChunk(dis);
             executeModuleChunk(moduleChunk);
         } catch (IOException e) {
-            throw new AuroraRuntimeException("Failed to load module: " + path + " — " + e.getMessage());
+            System.err.println("Failed to load module: " + path + " - " + e.getMessage());
         }
     }
 
@@ -1087,7 +1099,7 @@ public class VM {
 
             executeModuleChunk(moduleChunk);
         } catch (Exception e) {
-            throw new AuroraRuntimeException("Failed to compile and load module: " + path + " — " + e.getMessage());
+            throw new RuntimeException("Failed to load module: " + path + " - " + e.getMessage());
         }
     }
 

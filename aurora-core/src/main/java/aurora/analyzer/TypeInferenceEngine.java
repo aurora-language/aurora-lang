@@ -89,6 +89,7 @@ public final class TypeInferenceEngine {
 
     private final Program program;
     private final ModuleResolver modules;
+    private ClassDecl currentClass = null;
 
     /**
      * Scope stack: each entry maps a variable / parameter name to its type.
@@ -424,13 +425,19 @@ public final class TypeInferenceEngine {
     }
 
     private void visitClassDecl(ClassDecl decl) {
-        if (decl.members == null) return;
+        ClassDecl previousClass = currentClass;
+        currentClass = decl;
+        if (decl.members == null) {
+            currentClass = previousClass;
+            return;
+        }
         pushScope();
         for (Declaration member : decl.members) {
             if (member instanceof FieldDecl f)    visitFieldDecl(f);
             else if (member instanceof FunctionDecl f) visitFunctionDecl(f);
         }
         popScope();
+        currentClass = previousClass;
     }
 
     private void visitLoopStmt(LoopStmt stmt) {
@@ -577,6 +584,7 @@ public final class TypeInferenceEngine {
         if (e.callee instanceof AccessExpr access && access.object != null) {
             TypeNode receiverType = inferExpr(access.object);
             Declaration memberDecl = resolveMember(receiverType.name, access.member);
+
             if (memberDecl instanceof FunctionDecl f) {
                 TypeNode ret = resolvedReturnType(f);
                 if (isInProgress(ret)) {
@@ -597,6 +605,12 @@ public final class TypeInferenceEngine {
 
             // Constructor check: global name is a class / record.
             Declaration decl = resolve(name);
+
+            // if not found globally, check current class members
+            if (decl == null && currentClass != null) {
+                decl = resolveMember(currentClass.name, name);
+            }
+
             if (decl instanceof ClassDecl cls) return new TypeNode(e.loc, cls.name);
             if (decl instanceof RecordDecl rd) return new TypeNode(e.loc, rd.name);
 

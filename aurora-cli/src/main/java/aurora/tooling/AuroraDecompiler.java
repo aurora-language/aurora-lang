@@ -1,9 +1,6 @@
 package aurora.tooling;
 
-import aurora.runtime.ArClass;
-import aurora.runtime.ArFunction;
-import aurora.runtime.Chunk;
-import aurora.runtime.OpCode;
+import aurora.runtime.*;
 import picocli.CommandLine;
 
 import java.io.DataInputStream;
@@ -48,7 +45,7 @@ public class AuroraDecompiler implements Callable<Integer> {
                         // Skip version
                         dis.readInt();
                         // Load Chunk
-                        chunk = new aurora.runtime.VM().loadChunk(dis);
+                        chunk = new VM().loadChunk(dis);
                         break;
                     }
                 }
@@ -65,7 +62,7 @@ public class AuroraDecompiler implements Callable<Integer> {
                 // Skip version
                 dis.readInt();
 
-                chunk = new aurora.runtime.VM().loadChunk(dis);
+                chunk = new VM().loadChunk(dis);
             }
         }
 

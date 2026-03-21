@@ -33,31 +33,34 @@ public class SymbolResolver {
             return null;
 
         // Case A: cursor is directly ON a declaration node → return it immediately
-        if (node instanceof Declaration decl) {
-            return decl;
-        }
+        switch (node) {
+            case Declaration decl -> {
+                return decl;
+            }
 
-        // Case B: cursor is on a TypeNode (type annotation) → look up type name
-        if (node instanceof TypeNode typeNode && typeNode.name != null && !typeNode.name.isEmpty()
-                && !typeNode.name.equals("none")) {
-            Program prog = currentProgram != null ? currentProgram : findProgram(path);
-            return resolveTypeName(prog, typeNode.name, modules);
-        }
+            // Case B: cursor is on a TypeNode (type annotation) → look up type name
+            case TypeNode typeNode when typeNode.name != null && !typeNode.name.isEmpty() && !typeNode.name.equals("none") -> {
+                Program prog = currentProgram != null ? currentProgram : findProgram(path);
+                return resolveTypeName(prog, typeNode.name, modules);
+            }
 
-        // Case C: cursor is on `self` → no meaningful resolution without type inference
-        if (node instanceof SelfExpr) {
-            return null;
-        }
+            // Case C: cursor is on `self` → no meaningful resolution without type inference
+            case SelfExpr selfExpr -> {
+                return null;
+            }
 
-        // Case D: cursor is on `self.member` AccessExpr → resolve member in enclosing
-        // class
-        if (node instanceof AccessExpr access && access.object instanceof SelfExpr) {
-            ClassDecl cls = findEnclosingClass(path);
-            if (cls != null)
-                return resolveInClass(cls, access.member);
-            RecordDecl rec = findEnclosingRecord(path);
-            if (rec != null)
-                return resolveInRecord(rec, access.member);
+            // Case D: cursor is on `self.member` AccessExpr → resolve member in enclosing
+            // class
+            case AccessExpr access when access.object instanceof SelfExpr -> {
+                ClassDecl cls = findEnclosingClass(path);
+                if (cls != null)
+                    return resolveInClass(cls, access.member);
+                RecordDecl rec = findEnclosingRecord(path);
+                if (rec != null)
+                    return resolveInRecord(rec, access.member);
+            }
+            default -> {
+            }
         }
 
         // Case D.1: cursor is on `object.member` where object is an instance or a
@@ -297,21 +300,28 @@ public class SymbolResolver {
     public static Node resolveTypeName(Program program, String typeName, ModuleResolver modules) {
         if (program != null && program.statements != null) {
             for (Statement stmt : program.statements) {
-                if (stmt instanceof ClassDecl cd && typeName.equals(cd.name))
-                    return cd;
-                if (stmt instanceof RecordDecl rd && typeName.equals(rd.name))
-                    return rd;
-                if (stmt instanceof InterfaceDecl id && typeName.equals(id.name))
-                    return id;
-                if (stmt instanceof EnumDecl ed && typeName.equals(ed.name))
-                    return ed;
+                switch (stmt) {
+                    case ClassDecl cd when typeName.equals(cd.name) -> {
+                        return cd;
+                    }
+                    case RecordDecl rd when typeName.equals(rd.name) -> {
+                        return rd;
+                    }
+                    case InterfaceDecl id when typeName.equals(id.name) -> {
+                        return id;
+                    }
+                    case EnumDecl ed when typeName.equals(ed.name) -> {
+                        return ed;
+                    }
+                    default -> {}
+                }
             }
         }
         // Not found locally — try imported modules
         if (modules != null && program != null) {
-            Declaration ext = modules.resolveFromImports(program, typeName);
-            if (ext != null)
-                return ext;
+            Declaration decl = modules.resolveFromImports(program, typeName);
+            if (decl == null) decl = modules.resolveImportedModule(program, typeName);
+            return decl;
         }
         return null;
     }

@@ -46,6 +46,8 @@ public class AuroraTextDocumentService implements TextDocumentService {
     /** Resolves modules and library paths for cross-file features. */
     private final ModuleResolver moduleResolver = new ModuleResolver();
 
+    private final Map<String, String> sourceCache = new ConcurrentHashMap<>();
+
     /**
      * Constructs a new AuroraTextDocumentService.
      *
@@ -64,16 +66,18 @@ public class AuroraTextDocumentService implements TextDocumentService {
     @Override
     public void didOpen(DidOpenTextDocumentParams params) {
         String uri = params.getTextDocument().getUri();
+        String text = params.getTextDocument().getText();
         LspLogger.log("didOpen: " + uri);
         initProjectRoot(uri);
         hoverCache.keySet().removeIf(k -> k.startsWith(uri + ":"));
+        sourceCache.put(uri, text);
 
         List<Diagnostic> cached = diagnosticsCache.get(uri);
         if (cached != null) {
             server.getClient().publishDiagnostics(new PublishDiagnosticsParams(uri, cached));
         }
 
-        validateDocument(uri, params.getTextDocument().getText());
+        validateDocument(uri, text);
     }
 
     /**
@@ -105,10 +109,12 @@ public class AuroraTextDocumentService implements TextDocumentService {
 
     @Override
     public void didChange(DidChangeTextDocumentParams params) {
+        String text = params.getContentChanges().getFirst().getText();
         String uri = params.getTextDocument().getUri();
         LspLogger.log("didChange: " + uri);
         hoverCache.keySet().removeIf(k -> k.startsWith(uri + ":"));
-        validateDocument(uri, params.getContentChanges().getFirst().getText());
+        sourceCache.put(uri, text);
+        validateDocument(uri, text);
     }
 
     @Override
@@ -119,6 +125,7 @@ public class AuroraTextDocumentService implements TextDocumentService {
     public void didClose(DidCloseTextDocumentParams params) {
         String uri = params.getTextDocument().getUri();
         astMap.remove(uri);
+        sourceCache.remove(uri);
         hoverCache.keySet().removeIf(k -> k.startsWith(uri + ":"));
     }
 
@@ -413,7 +420,7 @@ public class AuroraTextDocumentService implements TextDocumentService {
         }
     }
 
-    /** {@link AuroraDiagnostic} を LSP4J の {@link Diagnostic} に変換する。 */
+    /** Converts an {@link AuroraDiagnostic} to an LSP4J {@link Diagnostic}. */
     private static Diagnostic toLspDiagnostic(AuroraDiagnostic d) {
         Diagnostic diag = new Diagnostic();
         diag.setSource(d.source());
@@ -440,13 +447,14 @@ public class AuroraTextDocumentService implements TextDocumentService {
     public CompletableFuture<SemanticTokens> semanticTokensFull(SemanticTokensParams params) {
         String uri = params.getTextDocument().getUri();
         Program program = astMap.get(uri);
+        String source = sourceCache.get(uri);
         LspLogger.log("semanticTokensFull request for %s (AST exists: %b)", uri, program != null);
         if (program == null) {
             return CompletableFuture.completedFuture(new SemanticTokens(Collections.emptyList()));
         }
 
         try {
-            List<Integer> tokens = SemanticTokenVisitor.getTokens(program, moduleResolver);
+            List<Integer> tokens = SemanticTokenVisitor.getTokens(program, moduleResolver, source);
             return CompletableFuture.completedFuture(new SemanticTokens(tokens));
         } catch (Exception e) {
             LspLogger.error("Failed to generate semantic tokens for " + uri, e);

@@ -87,6 +87,7 @@ dependencies {
 }
 
 shadowJar {
+    dependsOn(':aurora-cli:shadowJar', ':aurora-lsp:shadowJar', ':aurora-core:jar')
     archiveClassifier.set('')
     manifest {
         attributes(

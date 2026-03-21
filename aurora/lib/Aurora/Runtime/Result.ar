@@ -1,4 +1,4 @@
-namespace Aurora 
+namespace Aurora.Runtime
 
 use Aurora.Runtime.RuntimeError
 

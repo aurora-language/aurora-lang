@@ -1,5 +1,6 @@
 package aurora.analyzer;
 
+import aurora.parser.SourceLocation;
 import aurora.parser.tree.*;
 import aurora.parser.tree.decls.*;
 import aurora.parser.tree.expr.*;
@@ -52,11 +53,12 @@ public class TypeChecker implements NodeVisitor<TypeNode> {
     public TypeChecker(Program currentProgram, ModuleResolver modules) {
         this.currentProgram = currentProgram;
         this.modules = modules;
-        this.ANY = new TypeNode(new aurora.parser.SourceLocation(), "Any");
-        this.NONE = new TypeNode(new aurora.parser.SourceLocation(), "none");
+        this.ANY = new TypeNode(new SourceLocation(), "Any");
+        this.NONE = new TypeNode(new SourceLocation(), "none");
 
         if (modules != null) {
             globals.putAll(modules.loadImplicitImports());
+
         }
     }
 
@@ -710,9 +712,7 @@ public class TypeChecker implements NodeVisitor<TypeNode> {
             for (ParamDecl p : decl.params)
                 declareVariable(p.name, p.type);
         }
-        if (decl.body instanceof BlockStmt b) {
-            visitBlockStmt(b);
-        }
+        visitBlockStmt(decl.body);
         endScope();
         return NONE;
     }
@@ -910,14 +910,32 @@ public class TypeChecker implements NodeVisitor<TypeNode> {
                             }
                         }
                     }
-                    return func.returnType != null ? func.returnType : ANY;
+                    if (func.returnType != null) {
+                        return func.returnType;
+                    } else {
+                        reportWarn(expr, "Internal: CallExpr: Unable to inference in AccessExpr member access (callee: " + expr.callee.getClass().getName() + ", fun: " + func + ")");
+                        return ANY;
+                    }
                 }
             }
+            reportWarn(expr, "Internal: CallExpr: Unable to inference in AccessExpr (callee: " + expr.callee.getClass().getName() + ", receiver: " + access.object + ")");
             return ANY;
         }
 
         if (expr.callee instanceof AccessExpr bare && bare.object == null) {
             Declaration mayBeDecl = globals.get(bare.member);
+
+            if (mayBeDecl == null && currentClass != null) {
+                // search current class members directly
+                if (currentClass.members != null) {
+                    for (Declaration member : currentClass.members) {
+                        if (bare.member.equals(member.name)) {
+                            mayBeDecl = member;
+                            break;
+                        }
+                    }
+                }
+            }
 
             if (mayBeDecl instanceof ClassDecl || mayBeDecl instanceof RecordDecl) {
                 return new TypeNode(expr.loc, bare.member);
@@ -934,11 +952,16 @@ public class TypeChecker implements NodeVisitor<TypeNode> {
                         }
                     }
                 }
-                return fun.returnType != null ? fun.returnType : ANY;
+                if (fun.returnType != null) {
+                    return fun.returnType;
+                } else {
+                    reportWarn(expr, "Internal: CallExpr: Unable to inference in FunctionDecl (callee: " + expr.callee.getClass().getName() + ", fun: " + fun + ")");
+                    return ANY;
+                }
             }
         }
 
-        reportWarn(expr, "Internal: CallExpr: Unable to inference");
+        reportWarn(expr, "Internal: CallExpr: Unable to inference (callee: " + expr.callee.getClass().getName() + ")");
         return ANY;
     }
 
@@ -949,6 +972,7 @@ public class TypeChecker implements NodeVisitor<TypeNode> {
             if (!scopeType.name.equals("Any")) return scopeType;
 
             Declaration decl = globals.get(expr.member);
+            if (decl == null) decl = modules.resolveImportedModule(currentProgram, expr.member);
             if (decl instanceof ClassDecl cls) return new TypeNode(expr.loc, cls.name);
             if (decl instanceof FunctionDecl func) return func.returnType != null ? func.returnType : ANY;
             return scopeType;
@@ -959,7 +983,10 @@ public class TypeChecker implements NodeVisitor<TypeNode> {
         }
 
         TypeNode objectType = visitExpr(expr.object);
-        if (objectType.name.equals("Any")) return ANY;
+        if (objectType.name.equals("Any")) {
+            reportWarn(expr, "Internal: AccessExpr: Unable to inference object type: " + expr.object.getClass().getName());
+            return ANY;
+        }
 
         String baseTypeName = objectType.name;
 
@@ -973,7 +1000,7 @@ public class TypeChecker implements NodeVisitor<TypeNode> {
             }
         }
 
-        reportWarn(expr, "Unable to inference: " + expr.getClass().getName());
+        reportWarn(expr, "Internal: AccessExpr: Unable to inference (member: " + expr.member + ", object: " + expr.object + ")");
         return ANY;
     }
 

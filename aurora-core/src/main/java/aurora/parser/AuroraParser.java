@@ -107,6 +107,9 @@ public class AuroraParser extends AuroraParserBaseVisitor<Node> {
         CompilationUnitContext tree = parser.compilationUnit();
         AuroraParser visitor = new AuroraParser(sourceName, tokens);
         Program program = (Program) visitor.visitCompilationUnit(tree);
+        for (var pImport : program.imports) {
+            modules.loadModule(pImport.path);
+        }
         ASTPostProcessor.process(program, modules);
         return program;
     }

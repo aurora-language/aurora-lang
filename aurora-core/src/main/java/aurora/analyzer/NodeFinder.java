@@ -23,7 +23,7 @@ public class NodeFinder implements NodeVisitor<Void> {
     private final int column;
 
     /** A stack used during traversal to build the path from root to target node. */
-    private Deque<Node> pathStack = new ArrayDeque<>();
+    private final Deque<Node> pathStack = new ArrayDeque<>();
 
     /** The final path of nodes from the root down to the deepest node at the target position. */
     private List<Node> foundPath = null;

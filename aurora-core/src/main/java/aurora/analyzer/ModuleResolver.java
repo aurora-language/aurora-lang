@@ -1,5 +1,6 @@
 package aurora.analyzer;
 
+import aurora.Lib;
 import aurora.parser.AuroraParser;
 import aurora.parser.tree.Declaration;
 import aurora.parser.tree.Program;
@@ -8,15 +9,15 @@ import aurora.parser.tree.decls.ClassDecl;
 import aurora.parser.tree.decls.FunctionDecl;
 import aurora.parser.tree.decls.InterfaceDecl;
 import aurora.parser.tree.decls.RecordDecl;
+import org.antlr.v4.runtime.BaseErrorListener;
 
 import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.HashMap;
-import java.util.LinkedHashMap;
-import java.util.Map;
-import java.util.Optional;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Stream;
 
@@ -126,29 +127,38 @@ public class ModuleResolver {
         Map<String, Declaration> result = new HashMap<>();
         if (projectRoot == null) return result;
 
+        // Collect all paths: Aurora/Runtime scan + explicit Lib.implicitImports
+        Set<String> paths = new LinkedHashSet<>();
+
+        // 1. Scan Aurora/Runtime as before
         Path runtimeRoot = projectRoot.resolve("aurora/lib/Aurora/Runtime");
-        if (!Files.exists(runtimeRoot)) return result;
+        if (Files.exists(runtimeRoot)) {
+            try (Stream<Path> fs = Files.walk(runtimeRoot)) {
+                fs.filter(p -> p.toString().endsWith(".ar"))
+                        .forEach(file -> {
+                            Path rel = projectRoot.resolve("aurora/lib").relativize(file);
+                            String fqn = rel.toString()
+                                    .replace(File.separatorChar, '.')
+                                    .replaceAll("\\.ar$", "");
+                            paths.add(fqn);
+                        });
+            } catch (IOException ignored) {}
+        }
 
-        try (Stream<Path> fs = Files.walk(runtimeRoot)){
-            fs
-                    .filter(p -> p.toString().endsWith(".ar"))
-                    .forEach(file -> {
-                        Path rel = projectRoot.resolve("aurora/lib").relativize(file);
-                        String fqn = rel.toString()
-                                .replace(java.io.File.separatorChar, '.')
-                                .replaceAll("\\.ar$", "");
+        // 2. Add explicit implicit imports from Lib
+        paths.addAll(aurora.Lib.implicitImports);
 
-                        Program mod = loadModule(fqn);
-                        if (mod == null || mod.statements == null) return;
-
-                        for (Statement stmt : mod.statements) {
-                            if (stmt instanceof Declaration d && d.name != null) {
-                                result.putIfAbsent(fqn, d);
-                                result.putIfAbsent(d.name, d);
-                            }
-                        }
-                    });
-        } catch (IOException ignored) {}
+        // Load all collected paths
+        for (String fqn : paths) {
+            Program mod = loadModule(fqn);
+            if (mod == null || mod.statements == null) continue;
+            for (Statement stmt : mod.statements) {
+                if (stmt instanceof Declaration d && d.name != null) {
+                    result.putIfAbsent(fqn, d);
+                    result.putIfAbsent(d.name, d);
+                }
+            }
+        }
 
         return result;
     }
@@ -176,7 +186,7 @@ public class ModuleResolver {
             String src = Files.readString(file);
             System.getLogger("aurora.analyzer").log(System.Logger.Level.DEBUG,
                     () -> String.format("  ModuleResolver: loading '%s' from %s", importPath, file));
-            org.antlr.v4.runtime.BaseErrorListener errs = new org.antlr.v4.runtime.BaseErrorListener();
+            BaseErrorListener errs = new BaseErrorListener();
             Program program = AuroraParser.parseWithListener(src, file.toUri().toString(), errs, this);
             moduleCache.put(importPath, Optional.of(program));
             return program;

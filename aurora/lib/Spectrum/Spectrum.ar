@@ -1,0 +1,11 @@
+namespace Spectrum
+
+use Spectrum.App.Application
+use Spectrum.App.AppConfig
+
+api Spectrum {
+    /**
+     * Creates a new application and context
+     */
+    fun createApplication(windowName: string = "Spectrum Application", config: AppConfig) -> Application
+}

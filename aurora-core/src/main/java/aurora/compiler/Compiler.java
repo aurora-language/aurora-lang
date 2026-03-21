@@ -112,12 +112,11 @@ public class Compiler implements NodeVisitor<Void> {
         if (!checker.getDiagnostics().isEmpty()) {
             boolean hasError = checker.getDiagnostics().stream()
                     .anyMatch(d -> d.severity() == AuroraDiagnostic.Severity.ERROR);
+            for (AuroraDiagnostic d : checker.getDiagnostics()) {
+                System.err.print(AuroraDiagnostic.formatDiagnostic(d, program.loc.sourceName()));
+            }
             if (hasError) {
                 throw new TypeErrorException(checker.getDiagnostics());
-            } else {
-                for (AuroraDiagnostic d : checker.getDiagnostics()) {
-                    System.err.print(AuroraDiagnostic.formatDiagnostic(d, program.loc.sourceName()));
-                }
             }
         }
         this.globals = checker.getGlobals();
