@@ -284,14 +284,11 @@ public class TypeChecker implements NodeVisitor<TypeNode> {
             case ClassDecl cls -> {
                 if (cls.name.equals(targetName))
                     return true;
-                if (cls.superClass != null
-                        && inherits(SymbolResolver.resolveTypeName(currentProgram, cls.superClass.name, modules),
-                        targetName))
+                if (cls.superClass != null && inherits(SymbolResolver.resolveTypeName(currentProgram, cls.superClass.name, modules), targetName))
                     return true;
                 if (cls.interfaces != null) {
                     for (TypeNode iface : cls.interfaces) {
-                        if (inherits(SymbolResolver.resolveTypeName(currentProgram, iface.name, modules),
-                                targetName))
+                        if (inherits(SymbolResolver.resolveTypeName(currentProgram, iface.name, modules), targetName))
                             return true;
                     }
                 }

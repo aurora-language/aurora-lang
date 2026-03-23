@@ -11,9 +11,7 @@ import aurora.runtime.modules.ConcurrentModule;
 import aurora.runtime.modules.IoModule;
 import aurora.runtime.modules.NativeModule;
 
-import java.io.DataInputStream;
-import java.io.File;
-import java.io.IOException;
+import java.io.*;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -1074,7 +1072,7 @@ public class VM {
 
     private void loadArobj(Path path) {
         try (DataInputStream dis = new DataInputStream(
-                new java.io.BufferedInputStream(new java.io.FileInputStream(path.toFile())))) {
+                new BufferedInputStream(new FileInputStream(path.toFile())))) {
             int magic = dis.readInt();
             if (magic != 0x4155524F) {
                 throw new AuroraRuntimeException("Invalid module file (bad magic): " + path);
